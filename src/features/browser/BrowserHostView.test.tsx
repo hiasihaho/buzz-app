@@ -49,6 +49,7 @@ function fakePlatform(): BrowserPlatform {
       loading: false,
       error: null,
     })),
+    evaluate: vi.fn(),
     detach: vi.fn(async () => {}),
     openExternal: vi.fn(async () => {}),
   };
@@ -1005,6 +1006,59 @@ it("routes address and navigation controls to the active session", async () => {
   expect(platform.action).toHaveBeenCalledWith("session-1", "back");
   expect(platform.action).toHaveBeenCalledWith("session-1", "forward");
   expect(platform.action).toHaveBeenCalledWith("session-1", "reload");
+});
+
+it("runs scripts against the active session from the automation console", async () => {
+  const platform = fakePlatform();
+  vi.mocked(platform.evaluate).mockResolvedValue({ links: 12 });
+  const user = userEvent.setup();
+  render(
+    <BrowserHostView
+      url="https://example.com"
+      platform={platform}
+      sessions={new BrowserSessions(platform)}
+      pollInterval={50_000}
+    />,
+  );
+  await waitFor(() =>
+    expect(platform.status).toHaveBeenCalledWith("session-1"),
+  );
+  await user.click(screen.getByRole("button", { name: "Automation" }));
+  await user.type(
+    screen.getByLabelText("Script"),
+    "document.querySelectorAll('a').length",
+  );
+  await user.click(screen.getByRole("button", { name: "Run" }));
+  expect(platform.evaluate).toHaveBeenCalledWith(
+    "session-1",
+    "document.querySelectorAll('a').length",
+  );
+  expect(await screen.findByRole("status")).toHaveTextContent('"links": 12');
+});
+
+it("shows page errors from the automation console", async () => {
+  const platform = fakePlatform();
+  vi.mocked(platform.evaluate).mockRejectedValue(
+    new Error("ReferenceError: nope is not defined"),
+  );
+  const user = userEvent.setup();
+  render(
+    <BrowserHostView
+      url="https://example.com"
+      platform={platform}
+      sessions={new BrowserSessions(platform)}
+      pollInterval={50_000}
+    />,
+  );
+  await waitFor(() =>
+    expect(platform.status).toHaveBeenCalledWith("session-1"),
+  );
+  await user.click(screen.getByRole("button", { name: "Automation" }));
+  await user.type(screen.getByLabelText("Script"), "nope");
+  await user.click(screen.getByRole("button", { name: "Run" }));
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "ReferenceError: nope is not defined",
+  );
 });
 
 it("keeps Reload keyboard-accessible while the website is loading", async () => {

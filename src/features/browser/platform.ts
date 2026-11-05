@@ -62,6 +62,10 @@ export type BrowserStatus = Readonly<{
 
 export type BrowserAction = "back" | "forward" | "reload";
 
+export type BrowserEvaluation =
+  | { ok: true; value: unknown }
+  | { ok: false; error: string };
+
 export interface BrowserPlatform {
   readonly available: boolean;
   attach(
@@ -86,6 +90,7 @@ export interface BrowserPlatform {
   ): Promise<void>;
   action(sessionId: string, action: BrowserAction): Promise<void>;
   status(sessionId: string): Promise<BrowserStatus>;
+  evaluate(sessionId: string, script: string): Promise<unknown>;
   detach(sessionId: string): Promise<void>;
   /** Opens `url` in the system browser, outside Buzz. */
   openExternal(url: string): Promise<void>;
@@ -119,6 +124,19 @@ function attachError(error: unknown): unknown {
       ? (page as BrowserViewerPage)
       : undefined,
   );
+}
+
+/** Runs `script` in the guest's page scope and resolves with its
+ * JSON-serializable return value; page exceptions reject the promise. */
+function wrapAutomationScript(script: string): string {
+  return `(function () {
+  try {
+    const value = (0, eval)(${JSON.stringify(script)});
+    return { ok: true, value: value === undefined ? null : value };
+  } catch (error) {
+    return { ok: false, error: String(error instanceof Error ? (error.stack ?? error.message) : error) };
+  }
+})()`;
 }
 
 function normalizedUrl(url: string): string {
@@ -199,6 +217,20 @@ export function createBrowserPlatform(): BrowserPlatform {
       invoke("browser_action", { sessionId, action }),
     status: (sessionId) =>
       invoke<BrowserStatus>("browser_status", { sessionId }),
+    evaluate: async (sessionId, script) => {
+      const raw = await invoke<string>("browser_evaluate", {
+        sessionId,
+        script: wrapAutomationScript(script),
+      });
+      let evaluation: BrowserEvaluation;
+      try {
+        evaluation = JSON.parse(raw);
+      } catch {
+        throw new Error("Browser script returned an unserializable value");
+      }
+      if (!evaluation.ok) throw new Error(evaluation.error);
+      return evaluation.value;
+    },
     detach: (sessionId) => invoke("browser_detach", { sessionId }),
     openExternal: async (url) =>
       invoke("plugin:opener|open_url", { url: normalizedUrl(url) }),

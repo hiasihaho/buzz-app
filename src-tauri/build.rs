@@ -246,6 +246,7 @@ fn main() {
             "browser_navigate",
             "browser_action",
             "browser_status",
+            "browser_evaluate",
             "mesh_compute_catalog",
             "mesh_compute_share",
             "mesh_compute_inventory",

@@ -14,6 +14,7 @@ import {
   CloudOffIcon,
   DotsThreeIcon,
   LockIcon,
+  TerminalWindowIcon,
 } from "../../shared/design-system/icons/index";
 import { Button } from "../../shared/design-system/ui/Button";
 import { EmptyState } from "../../shared/design-system/ui/EmptyState";
@@ -128,6 +129,13 @@ export function BrowserHostView({
   // A retry that ends in the error bar instead hands its focus to the message.
   const errorBar = useRef<HTMLDivElement>(null);
   const focusError = useRef(false);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [scriptDraft, setScriptDraft] = useState("");
+  const [consoleBusy, setConsoleBusy] = useState(false);
+  const [consoleResult, setConsoleResult] = useState<{
+    text: string;
+    failed: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (!editing.current && status.url) setDraft(status.url);
@@ -441,6 +449,25 @@ export function BrowserHostView({
     void run((sessionId) => platform.action(sessionId, value));
   }
 
+  async function evaluateScript(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const sessionId = session.current;
+    const script = scriptDraft.trim();
+    if (!sessionId || !script || consoleBusy) return;
+    setConsoleBusy(true);
+    try {
+      const value = await platform.evaluate(sessionId, script);
+      setConsoleResult({
+        text: JSON.stringify(value, null, 2) ?? "undefined",
+        failed: false,
+      });
+    } catch (error) {
+      setConsoleResult({ text: message(error), failed: true });
+    } finally {
+      setConsoleBusy(false);
+    }
+  }
+
   const error = localError ?? status.error;
   useEffect(() => {
     if (!focusError.current || !error || page) return;
@@ -481,6 +508,14 @@ export function BrowserHostView({
             )
           }
         />
+        <IconButton
+          size="toolbar"
+          variant="quiet"
+          aria-label="Automation"
+          aria-expanded={consoleOpen}
+          onClick={() => setConsoleOpen((open) => !open)}
+          icon={<TerminalWindowIcon size={16} />}
+        />
         <form onSubmit={navigate}>
           <Input
             aria-label="Address"
@@ -501,6 +536,41 @@ export function BrowserHostView({
           </span>
         ) : null}
       </div>
+      {consoleOpen ? (
+        <form
+          className={styles.console}
+          aria-label="Browser automation"
+          onSubmit={evaluateScript}
+        >
+          <Input
+            aria-label="Script"
+            value={scriptDraft}
+            onChange={(event) => setScriptDraft(event.target.value)}
+            placeholder="document.querySelectorAll('a').length"
+            disabled={consoleBusy}
+          />
+          <Button
+            type="submit"
+            variant="subtle"
+            size="sm"
+            disabled={consoleBusy || !scriptDraft.trim()}
+          >
+            Run
+          </Button>
+          {consoleResult ? (
+            <pre
+              className={
+                consoleResult.failed
+                  ? styles.consoleError
+                  : styles.consoleOutput
+              }
+              role="status"
+            >
+              {consoleResult.text}
+            </pre>
+          ) : null}
+        </form>
+      ) : null}
       {error && !page ? (
         <div ref={errorBar} className={styles.error} role="alert" tabIndex={-1}>
           {error}

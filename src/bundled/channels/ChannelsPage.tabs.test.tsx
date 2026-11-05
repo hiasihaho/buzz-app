@@ -580,6 +580,7 @@ it("moving the last side app adopts its guest before the dock exit finishes", as
       observed.push(url);
       return { url, title: "App", loading: false, error: null };
     },
+    evaluate: async () => null,
   };
   const sessions = new BrowserSessions(platform);
   const App = () => (

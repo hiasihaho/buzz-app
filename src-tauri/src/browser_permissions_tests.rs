@@ -231,6 +231,7 @@ fn native_command_permissions_isolate_webviews() {
         "browser_navigate",
         "browser_action",
         "browser_status",
+        "browser_evaluate",
     ];
     let local_origin = if cfg!(windows) {
         "http://tauri.localhost"

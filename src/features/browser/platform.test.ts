@@ -296,4 +296,33 @@ describe("createBrowserPlatform", () => {
     ).rejects.toThrow("Only http and https URLs are supported");
     expect(sdk.invoke).not.toHaveBeenCalled();
   });
+
+  it("evaluates scripts in the guest and unwraps results", async () => {
+    const platform = createBrowserPlatform();
+    sdk.invoke.mockResolvedValueOnce(
+      JSON.stringify({ ok: true, value: 42 }) as never,
+    );
+    await expect(platform.evaluate("session-1", "1 + 41")).resolves.toBe(42);
+    const calls = sdk.invoke.mock.calls as unknown as Array<
+      [string, { sessionId: string; script: string }]
+    >;
+    expect(calls[0]?.[0]).toBe("browser_evaluate");
+    expect(calls[0]?.[1].sessionId).toBe("session-1");
+    // The wrapper keeps page exceptions off the native wire format.
+    expect(calls[0]?.[1].script).toContain('(0, eval)("1 + 41")');
+  });
+
+  it("rejects with the page error or on unserializable results", async () => {
+    const platform = createBrowserPlatform();
+    sdk.invoke.mockResolvedValueOnce(
+      JSON.stringify({ ok: false, error: "ReferenceError: nope" }) as never,
+    );
+    await expect(platform.evaluate("session-1", "nope")).rejects.toThrow(
+      "ReferenceError: nope",
+    );
+    sdk.invoke.mockResolvedValueOnce("" as never);
+    await expect(platform.evaluate("session-1", "1")).rejects.toThrow(
+      "unserializable",
+    );
+  });
 });

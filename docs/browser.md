@@ -81,6 +81,17 @@ Changes to the locked Tauri/Wry versions require native navigation, resize, tear
 
 The macOS webview currently lacks detailed network-failure reporting through the shared Wry callbacks. A failed TLS/network navigation can leave a blank page; the address field and Reload remain available. The toolbar reads native loading state rather than leaving its loading indicator pending indefinitely. File upload is unavailable on macOS. Rejected website navigation may originate in a subframe, so it is blocked without attributing a top-level page error; an invalid address submitted through Buzz's controls still reports its validation error.
 
+### Script evaluation
+
+The browser panel offers an automation console (toolbar terminal toggle): a
+script row whose input runs in the guest's page scope through the
+`browser_evaluate` command, with the JSON-serializable result or the page error
+rendered inline. Evaluation flows main webview → native → guest only; the guest
+gains no IPC surface, scripts cap at 256 KiB, and a guest that never answers
+fails after 30 seconds. The command is a trusted-host primitive for the app's
+own chrome; it is not part of the plugin author contract. Promises are not
+awaited — return values serialize through WebKit's JSON bridge.
+
 ## Verification
 
 Host tests cover view ownership, browser controls and generated native permissions. Native acceptance must additionally exercise link opening inside the main window, navigation, panel/window resize, overlay visibility, close/reopen, guest IPC absence and rejected navigation against the actual application. PR evidence records the platform and exact checked commit; untested platforms remain unverified.

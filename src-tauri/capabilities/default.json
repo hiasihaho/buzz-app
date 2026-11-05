@@ -206,6 +206,7 @@
     "allow-browser-navigate",
     "allow-browser-action",
     "allow-browser-status",
+    "allow-browser-evaluate",
     "core:app:allow-version",
     "core:event:allow-listen",
     "core:event:allow-unlisten",

@@ -597,6 +597,45 @@ pub async fn browser_status(app: AppHandle, session_id: String) -> Result<Browse
     .await
 }
 
+/// Scripts past this size are almost certainly pasted page sources, not
+/// automation snippets.
+const MAX_SCRIPT_BYTES: usize = 262_144;
+
+/// Runs a script in the guest's page and resolves with its return value as a
+/// JSON string. The guest stays without a Tauri bridge; evaluation goes
+/// main webview → native → guest, never the other way. A guest that never
+/// answers (hung page) fails instead of parking the caller.
+#[tauri::command]
+pub async fn browser_evaluate(
+    app: AppHandle,
+    session_id: String,
+    script: String,
+) -> Result<String, String> {
+    if script.len() > MAX_SCRIPT_BYTES {
+        return Err("Browser scripts cannot exceed 256 KiB".into());
+    }
+    let generation = DOCUMENT_GENERATION.load(Ordering::SeqCst);
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    on_main_thread(&app, move || {
+        with_current_document(&DOCUMENT_GENERATION, generation, || {
+            with_browser(&session_id, |browser| {
+                browser
+                    .guest
+                    .evaluate_script_with_callback(&script, move |result| {
+                        let _ = sender.try_send(result);
+                    })
+                    .map_err(|error| error.to_string())
+            })
+        })
+    })
+    .await?;
+    match tokio::time::timeout(std::time::Duration::from_secs(30), receiver.recv()).await {
+        Ok(Some(result)) => Ok(result),
+        Ok(None) => Err("Browser session is closed or replaced".into()),
+        Err(_) => Err("Browser script did not answer within 30 seconds".into()),
+    }
+}
+
 #[cfg(test)]
 mod storage_tests {
     use super::storage_identifier;
