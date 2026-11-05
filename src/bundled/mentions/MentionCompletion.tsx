@@ -392,8 +392,12 @@ export function MentionCompletion({
             retry: () => {
               teams.retry();
               model.directory.retry();
+              // Reread the agent library only when it failed: while a reload
+              // runs, shown rows that depend on it are disabled.
               void session.agentChoices.refresh(
-                model.includeLegacy || teams.includeLegacy,
+                (model.includeLegacy &&
+                  (agents.status === "error" || !!agents.error)) ||
+                  teams.includeLegacy,
               );
               void session.archives?.refresh();
               retry((value) => value + 1);

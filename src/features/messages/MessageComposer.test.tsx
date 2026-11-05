@@ -53,6 +53,7 @@ import type {
 import { MENTION_RESOLVE_TIMEOUT_MS } from "../conversation/completion";
 import { mentionQuery } from "../../bundled/mentions/mention-query";
 import { MentionCompletion } from "../../bundled/mentions/MentionCompletion";
+import { MentionPicker } from "../../bundled/mentions/MentionPicker";
 import type { MentionRecipient } from "./mention-draft";
 import type { AgentLibrarySnapshot } from "../agents/library";
 import { createAgentChoices } from "../agents/choices";
@@ -14509,6 +14510,76 @@ it("rereads the agent library on Retry when it failed and the owner has agents i
     screen.getByRole("option", { name: /In oss\.example\.com/ }),
   ).toHaveAttribute("aria-disabled", "false");
 });
+
+it("keeps the agent library on a Retry that does not need it", async () => {
+  const h = mountDirectoryMention({
+    agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Rocket" }),
+    channel: { channelType: "stream" },
+    session: {
+      directMessages: {
+        people: vi.fn(() => Promise.reject(new Error("offline"))),
+      },
+    },
+  });
+  await h.user.type(h.input(), "@rocket");
+  await screen.findByText(
+    "Could not search community people. Retry to refresh.",
+  );
+  await h.user.click(screen.getByRole("option", { name: "Retry suggestions" }));
+  expect(h.session.agentLibrary.refresh).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole("option", { name: /In oss\.example\.com/ }),
+  ).toHaveAttribute("aria-disabled", "false");
+});
+
+it.each([
+  ["starts", "stream"],
+  ["does not start", "dm"],
+])(
+  "%s reading the owner's agents here when a %s composer mounts and the owner has agents in other communities",
+  (_, channelType) => {
+    const h = mountDirectoryMention({
+      agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Rocket" }),
+      channel: { channelType },
+    });
+    h.setLibrary([], "idle");
+    const empty: [] = [];
+    const none = { snapshot: () => empty, subscribe: () => () => {} };
+    const picker: readonly Contribution<ComposerTool>[] = [
+      {
+        id: "picker",
+        key: "buzz.mentions/picker",
+        pluginId: "buzz.mentions",
+        revision: "1",
+        title: "Mentions",
+        component: (props) => (
+          <MentionPicker
+            session={props.session}
+            scope={props.scope}
+            channelId={props.channelId}
+            disabled={props.disabled}
+            inviteAgents={props.inviteAgents}
+            select={props.insertMention}
+          />
+        ),
+      },
+    ];
+    h.retarget({
+      extensions: {
+        tools: { snapshot: () => picker, subscribe: () => () => {} },
+        inline: none,
+        completions: none,
+      },
+    });
+    // The composer's picker is mounted; nobody has typed `@`.
+    expect(
+      screen.getByRole("button", { name: "Mention a member" }),
+    ).toBeInTheDocument();
+    if (channelType === "stream")
+      expect(h.session.agentLibrary.refresh).toHaveBeenCalled();
+    else expect(h.session.agentLibrary.refresh).not.toHaveBeenCalled();
+  },
+);
 
 it("settles a pending mention into the owner's agent from another community once their agents here load", async () => {
   const rocket = { pubkey: "e".repeat(64), name: "Rocket" };

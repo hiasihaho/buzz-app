@@ -309,7 +309,9 @@ These rules keep a row from moving under the user's pointer or keyboard.
   shown row. While those load, a query that matches (section 3) the name of one
   of the viewer's agents from other communities waits: the agent list is still
   loading (section 5), and directory people wait too, so those agents still
-  show before directory people.
+  show before directory people. A client SHOULD start loading the viewer's
+  agents here when a composer that offers such agents opens, so that this wait
+  is rare.
 - A shown row MUST NOT move while the query and the open chooser stay the same.
   New rows are added only at the bottom. Directory people come after the rows
   already shown.

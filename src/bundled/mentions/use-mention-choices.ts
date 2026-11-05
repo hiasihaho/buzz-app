@@ -270,17 +270,11 @@ export function useMentionChoices(
   const community = useContext(AgentsContext);
   const revision = useAgentsSnapshot(community);
   // Offering them needs the owner's agents here for the name rule (README
-  // section 1): load those, as inviting agents does.
+  // section 1): load those, as inviting agents does. A closed chooser loads
+  // them too: the composer's picker mounts with it, before the first `@`.
   const includeLegacy =
-    open &&
-    (!!invite ||
-      elsewhereMatches(
-        session,
-        channelId,
-        invite,
-        roster,
-        community?.joinable(),
-      ));
+    (open && !!invite) ||
+    elsewhereMatches(session, channelId, invite, roster, community?.joinable());
   const agents = useAgentChoices(session, includeLegacy);
   // Until those are known they are held; only a query one of them matches
   // waits (README section 6).
