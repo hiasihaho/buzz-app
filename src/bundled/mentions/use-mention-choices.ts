@@ -24,6 +24,7 @@ import {
   directoryChanges,
   managedByDetail,
   mentionCandidates,
+  offeredElsewhere,
 } from "./mention-candidates";
 import { useListedChannel } from "../../features/relay/listed-channel";
 import { useNamesRevision } from "../../features/identity-names/react";
@@ -220,6 +221,8 @@ export type SpaceEvidence = {
  * Space (README section 5): once every member is named, an exact local name
  * selects at once. Any other exact name needs the full choice set: while the
  * directory search runs, failed, or has more pages, a namesake may be missing.
+ * The owner's agents from other communities never make a name here ambiguous:
+ * one is the exact name only when nothing here has that name.
  */
 export function spaceMention(
   all: readonly MentionChoice[],
@@ -229,11 +232,18 @@ export function spaceMention(
 ) {
   if (pending) return undefined;
   const choices = matchingMentions(all, query);
+  const here = (c: MentionChoice) => !c.elsewhere;
   return (
     (missingNames
       ? undefined
-      : exactMention(choices, query, (c) => local.has(c.recipient.pubkey))) ??
-    (complete ? exactMention(choices, query) : undefined)
+      : exactMention(
+          choices,
+          query,
+          (c) => here(c) && local.has(c.recipient.pubkey),
+        )) ??
+    (complete
+      ? (exactMention(choices, query, here) ?? exactMention(choices, query))
+      : undefined)
   );
 }
 /**
@@ -337,7 +347,7 @@ export function useMentionChoices(
         roster,
         selected,
         people,
-        community?.joinable(),
+        offeredElsewhere(session, community?.joinable()),
       ),
     [session, channelId, invite, roster, selected, people, community],
   );
@@ -349,7 +359,7 @@ export function useMentionChoices(
       invite,
       roster,
       undefined,
-      community?.joinable(),
+      offeredElsewhere(session, community?.joinable()),
     );
     const cached = keySets.get(local);
     if (cached) return cached;

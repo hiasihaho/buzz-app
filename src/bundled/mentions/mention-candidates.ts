@@ -8,6 +8,7 @@ import {
 import { knownAgentPubkeys } from "../../features/agents/known";
 import type { Agent } from "../../features/agents/service";
 import { communityHost } from "../../features/messages/community-host";
+import { normalizeName } from "../../features/search/person-match";
 import {
   allowsOutsideMentions,
   archivedMention,
@@ -71,6 +72,26 @@ type DirectoryPerson = MentionRecipient & {
 };
 type ElsewhereAgent = Pick<Agent, "pubkey" | "name" | "relay">;
 const none: readonly never[] = [];
+
+/**
+ * The owner's agents from their other communities that the chooser offers by
+ * name (README section 1): none named like one of the owner's unarchived
+ * agents here, which already has that name. Teams still reach them by key.
+ */
+export function offeredElsewhere(
+  session: ComposerSession,
+  elsewhere: readonly ElsewhereAgent[] | undefined,
+) {
+  if (!elsewhere?.length) return elsewhere;
+  const here = new Set(
+    session.agentChoices
+      .snapshot()
+      .identities.filter((agent) => !archivedMention(session, agent.pubkey))
+      .map((agent) => normalizeName(agent.name)),
+  );
+  return elsewhere.filter((agent) => !here.has(normalizeName(agent.name)));
+}
+
 // Rows change only with their sources, not with each keystroke. Snapshots are
 // immutable, so identity is their revision; `joinable()` copies on each call.
 // Each directory array keeps its own rows: the chooser and its team rows pass

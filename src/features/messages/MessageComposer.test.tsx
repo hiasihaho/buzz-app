@@ -14258,13 +14258,51 @@ function elsewhereAgent(agent: MentionRecipient) {
   } as unknown as Agents;
 }
 
-it("returns a pending mention to prose when a member shares its name with the owner's agent from another community", async () => {
-  // The chooser counts the other community's agent as a local namesake, so
-  // Space holds a chip; the resolver must decide over the same set.
+it.each([
+  ["at once when every member is named", true],
+  ["once the pending name resolves", false],
+])(
+  "tags a member who shares its name with the owner's agent from another community, %s",
+  async (_, named) => {
+    // The other community's agent never makes a name here ambiguous, in the
+    // chooser or in the resolver.
+    const h = mountDirectoryMention({
+      agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Mira" }),
+      channel: { channelType: "stream" },
+    });
+    h.setProfiles(
+      new Map([
+        [first.pubkey, { name: "Mira" }],
+        ...(named
+          ? [[second.pubkey, { name: "Another Member" }] as const]
+          : []),
+      ]),
+    );
+    await h.user.type(h.input(), "@mira");
+    await screen.findByRole("option", { name: /In oss\.example\.com/ });
+    await h.user.keyboard(" ");
+    if (!named) {
+      // A member's name still unknown keeps the chooser from deciding Space.
+      expect(h.chip("mira")).toHaveAttribute("aria-busy", "true");
+      await waitFor(() => expect(h.people).toHaveBeenCalled());
+      await h.release({ people: [], hasMore: false });
+    }
+    await waitFor(() => expect(h.input()).toHaveValue("@Mira "));
+    expect(h.chip("mira")).toBeNull();
+    expect(h.recipients()).toHaveLength(1);
+    h.submit();
+    await act(async () => {});
+    expect(h.messages.send).toHaveBeenCalledOnce();
+    expect(h.messages.send.mock.calls[0]?.[2]).toEqual([first.pubkey]);
+  },
+);
+
+it("does not offer the owner's agent from another community when one of their agents here has its name", async () => {
   const h = mountDirectoryMention({
     agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Mira" }),
     channel: { channelType: "stream" },
   });
+  h.setLibrary([{ pubkey: first.pubkey, name: "Mira" }]);
   h.setProfiles(
     new Map([
       [first.pubkey, { name: "Mira" }],
@@ -14272,19 +14310,38 @@ it("returns a pending mention to prose when a member shares its name with the ow
     ]),
   );
   await h.user.type(h.input(), "@mira");
-  await screen.findByRole("option", { name: /In oss\.example\.com/ });
+  // Rows from other communities install with the members' rows.
+  await screen.findByRole("option", { name: /Mira/ });
+  expect(
+    screen.queryByRole("option", { name: /In oss\.example\.com/ }),
+  ).toBeNull();
   await h.user.keyboard(" ");
+  await waitFor(() => expect(h.input()).toHaveValue("@Mira "));
+  expect(h.recipients()).toHaveLength(1);
+});
+
+it("selects the owner's agent from another community on Space once the search finds no other match", async () => {
+  const rocket = { pubkey: "e".repeat(64), name: "Rocket" };
+  const h = mountDirectoryMention({
+    agents: elsewhereAgent(rocket),
+    channel: { channelType: "stream" },
+  });
+  await h.user.type(h.input(), "@rocket");
+  await screen.findByRole("option", { name: /In oss\.example\.com/ });
+  await screen.findByText("Searching community…");
+  await h.user.keyboard(" ");
+  // A directory result in this community could still have the name.
+  expect(h.chip("rocket")).toHaveAttribute("aria-busy", "true");
   await waitFor(() => expect(h.people).toHaveBeenCalled());
   await h.release({ people: [], hasMore: false });
-  await waitFor(() => expect(h.chip("mira")).toBeNull());
-  expect(h.input()).toHaveValue("@mira ");
-  expect(
-    screen.queryByRole("region", { name: "Explicit mentions" }),
-  ).toBeNull();
+  await waitFor(() => expect(h.input()).toHaveValue("@Rocket "));
+  expect(h.chip("rocket")).toBeNull();
+  expect(h.recipients()).toHaveLength(1);
   h.submit();
-  await act(async () => {});
-  expect(h.messages.send).toHaveBeenCalledOnce();
-  expect(h.messages.send.mock.calls[0]?.at(-1)).toEqual([]);
+  expect(await screen.findByRole("dialog")).toHaveTextContent(
+    /Bring Rocket into/,
+  );
+  expect(h.messages.send).not.toHaveBeenCalled();
 });
 
 it("settles a pending mention into the owner's agent from another community that is archived here, as Tab would", async () => {

@@ -1382,6 +1382,46 @@
         }
       ],
       "expected": null
+    },
+    {
+      "name": "agent_from_another_community_does_not_make_a_name_here_ambiguous",
+      "query": "Jitter",
+      "choices": [
+        {
+          "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "name": "Jitter",
+          "member": true
+        },
+        {
+          "pubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "name": "Jitter",
+          "member": false,
+          "agent": true,
+          "owned": true,
+          "elsewhere": "other.example.com"
+        }
+      ],
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "agent_from_another_community_selects_when_nothing_here_has_the_name",
+      "query": "jitter",
+      "choices": [
+        {
+          "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "name": "Member",
+          "member": true
+        },
+        {
+          "pubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "name": "Jitter",
+          "member": false,
+          "agent": true,
+          "owned": true,
+          "elsewhere": "other.example.com"
+        }
+      ],
+      "expected": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }
   ],
   "query": [
