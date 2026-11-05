@@ -247,13 +247,14 @@ it.each(mentionConformance.ranking)(
 it.each(mentionConformance.space)(
   "conforms to the portable Space contract: $name",
   (fixture) => {
-    // Step 2 of section 5 over the complete choice set: members and agents
-    // from other communities are local; other choices are directory results.
+    // Step 2 of section 5 over the complete choice set: members, offered
+    // agents and agents from other communities are local; other choices are
+    // directory results.
     const choices = fixture.choices.map(fixtureChoice);
     const local = new Set(
-      choices
-        .filter((c) => c.member || c.elsewhere)
-        .map((c) => c.recipient.pubkey),
+      fixture.choices
+        .filter((c) => c.member || c.offered || c.elsewhere)
+        .map((c) => c.pubkey),
     );
     expect(
       spaceMention(choices, local, fixture.query, {

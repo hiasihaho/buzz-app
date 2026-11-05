@@ -407,14 +407,14 @@ each choice supplies its own label.
 | --- | --- |
 | `matching` | Section 3. `expected` is the tier of `label` for `query` (0 to 3), or `null` when it does not match. |
 | `ranking` | Sections 3 and 4. `expected` is the full ordered key list. |
-| `space` | Section 5 step 2 over one complete choice set, with its precedence. Members and choices with `elsewhere` (section 1, item 3) are local; other non-members are directory results. The local-first step is tested only in the desktop UI tests. `expected` is a key or `null`. |
+| `space` | Section 5 step 2 over one complete choice set, with its precedence. Members, choices with `offered` (section 1, item 2) and choices with `elsewhere` (item 3) are local; other non-members are directory results. The local-first step is tested only in the desktop UI tests. `expected` is a key or `null`. |
 | `query` | Section 2 syntax. `expected` is `{start, end, query}` or `null`. |
 | `admission` | Section 2 multi-word rule. `expected` is a boolean. |
 | `tags.write` | Section 8 writer. `expected` is the ordered `p` and `mention` tags, or an error class: `not_member`, `invalid`, or `too_many`. The sender is a member in addition to `members`. |
 | `tags.read` | Section 8 reader. `expected` is `{mentions, references}`. |
 
 Choice defaults: `label` is `name`, `aliases` is `[name]`, and `agent`, `owned`,
-and `managed` are false. `elsewhere` (the host of another community) is absent. `history` maps a key to recency (higher is newer).
+`managed` and `offered` are false. `elsewhere` (the host of another community) is absent. `history` maps a key to recency (higher is newer).
 `presence` maps a key to `online` or `away`; a missing key is unknown.
 
 Section 6 and the prompt in section 7 are interaction rules. Test them with

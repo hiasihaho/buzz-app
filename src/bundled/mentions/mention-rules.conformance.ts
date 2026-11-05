@@ -9,6 +9,7 @@ export type FixtureChoice = {
   aliases?: string[];
   member: boolean;
   agent?: boolean;
+  offered?: boolean;
   elsewhere?: string;
   owned?: boolean;
   managed?: boolean;

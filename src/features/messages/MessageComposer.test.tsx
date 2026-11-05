@@ -14323,6 +14323,49 @@ it("does not offer the owner's agent from another community when one of their ag
   expect(h.recipients()).toHaveLength(1);
 });
 
+it.each([
+  ["from the chooser", true],
+  ["once the pending name resolves", false],
+])(
+  "tags the owner's agent here that is not in the channel, not its namesake from another community, %s",
+  async (_, named) => {
+    // The owner's agents here have their names whether or not they are
+    // members, so the other community's namesake is never offered.
+    const goose = { pubkey: "f".repeat(64), name: "Goose" };
+    const h = mountDirectoryMention({
+      agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Goose" }),
+      channel: { channelType: "stream" },
+    });
+    h.setLibrary([goose]);
+    // A member's name still unknown keeps the chooser from deciding Space.
+    if (!named)
+      h.setProfiles(new Map([[first.pubkey, { name: "Other Member" }]]));
+    await h.user.type(h.input(), "@goose");
+    expect(
+      await screen.findByRole("option", { name: /Goose/ }),
+    ).toHaveAccessibleName(/Not in channel/);
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    await h.user.keyboard(" ");
+    if (!named) {
+      expect(h.chip("goose")).toHaveAttribute("aria-busy", "true");
+      await waitFor(() => expect(h.people).toHaveBeenCalled());
+      await h.release({ people: [], hasMore: false });
+    }
+    await waitFor(() => expect(h.input()).toHaveValue("@Goose "));
+    expect(h.chip("goose")).toBeNull();
+    expect(h.recipients()).toHaveLength(1);
+    h.submit();
+    // Not "Bring Goose into": the agent here is the recipient.
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "Goose is not in this channel.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send anyway" }));
+    await act(async () => {});
+    expect(h.messages.send).toHaveBeenCalledOnce();
+    expect(h.messages.send.mock.calls[0]?.at(-1)).toEqual([goose.pubkey]);
+  },
+);
+
 it("selects the owner's agent from another community on Space at once, while the search runs", async () => {
   const rocket = { pubkey: "e".repeat(64), name: "Rocket" };
   const h = mountDirectoryMention({
