@@ -77,19 +77,50 @@ const none: readonly never[] = [];
  * The owner's agents from their other communities that the chooser offers by
  * name (README section 1): none named like one of the owner's unarchived
  * agents here, which already has that name. Teams still reach them by key.
+ * None until the owner's agents here are known (`elsewhereHeld`).
  */
 export function offeredElsewhere(
   session: ComposerSession,
   elsewhere: readonly ElsewhereAgent[] | undefined,
 ) {
   if (!elsewhere?.length) return elsewhere;
+  const agents = session.agentChoices.snapshot();
+  if (agents.pending) return none;
   const here = new Set(
-    session.agentChoices
-      .snapshot()
-      .identities.filter((agent) => !archivedMention(session, agent.pubkey))
+    agents.identities
+      .filter((agent) => !archivedMention(session, agent.pubkey))
       .map((agent) => normalizeName(agent.name)),
   );
   return elsewhere.filter((agent) => !here.has(normalizeName(agent.name)));
+}
+
+/**
+ * Whether the chooser holds back the owner's agents from other communities it
+ * would offer here while the owner's agents here load, so that a row it shows
+ * never leaves under the name rule (README section 6). Until then the agent
+ * list is loading: Space waits as for invited agents.
+ */
+export function elsewhereHeld(
+  session: ComposerSession,
+  channelId: string,
+  inviteAgents: boolean | undefined,
+  roster: readonly MentionRecipient[] | undefined,
+  elsewhere: readonly ElsewhereAgent[] | undefined,
+) {
+  if (
+    roster ||
+    inviteAgents ||
+    !elsewhere?.length ||
+    !session.agentChoices.snapshot().pending
+  )
+    return false;
+  const channel = session.channels
+    .list()
+    .channels.find((c) => c.id === channelId);
+  return (
+    availableMentionAgents(channel, elsewhere, session.outbox?.supports(9000))
+      .length > 0
+  );
 }
 
 // Rows change only with their sources, not with each keystroke. Snapshots are

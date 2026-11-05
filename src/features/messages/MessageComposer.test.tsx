@@ -14320,7 +14320,7 @@ it("does not offer the owner's agent from another community when one of their ag
   expect(h.recipients()).toHaveLength(1);
 });
 
-it("selects the owner's agent from another community on Space once the search finds no other match", async () => {
+it("selects the owner's agent from another community on Space at once, while the search runs", async () => {
   const rocket = { pubkey: "e".repeat(64), name: "Rocket" };
   const h = mountDirectoryMention({
     agents: elsewhereAgent(rocket),
@@ -14330,11 +14330,8 @@ it("selects the owner's agent from another community on Space once the search fi
   await screen.findByRole("option", { name: /In oss\.example\.com/ });
   await screen.findByText("Searching community…");
   await h.user.keyboard(" ");
-  // A directory result in this community could still have the name.
-  expect(h.chip("rocket")).toHaveAttribute("aria-busy", "true");
-  await waitFor(() => expect(h.people).toHaveBeenCalled());
-  await h.release({ people: [], hasMore: false });
-  await waitFor(() => expect(h.input()).toHaveValue("@Rocket "));
+  // A directory result found later could not outrank it.
+  expect(h.input()).toHaveValue("@Rocket ");
   expect(h.chip("rocket")).toBeNull();
   expect(h.recipients()).toHaveLength(1);
   h.submit();
@@ -14342,6 +14339,102 @@ it("selects the owner's agent from another community on Space once the search fi
     /Bring Rocket into/,
   );
   expect(h.messages.send).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["from the chooser", true],
+  ["once the pending name resolves", false],
+])(
+  "selects the owner's agent from another community over a same-named directory result, %s",
+  async (_, named) => {
+    const rocket = { pubkey: "e".repeat(64), name: "Rocket" };
+    const stranger = { pubkey: "d".repeat(64), name: "Rocket" };
+    const h = mountDirectoryMention({
+      agents: elsewhereAgent(rocket),
+      channel: { channelType: "stream" },
+    });
+    // A member's name still unknown keeps the chooser from deciding Space.
+    if (!named)
+      h.setProfiles(new Map([[first.pubkey, { name: "Other Member" }]]));
+    await h.user.type(h.input(), "@rocket");
+    await screen.findByRole("option", { name: /In oss\.example\.com/ });
+    if (named) {
+      await waitFor(() => expect(h.people).toHaveBeenCalled());
+      await h.release({ people: [stranger], hasMore: false });
+      await screen.findByRole("option", { name: /Not in channel/ });
+    }
+    await h.user.keyboard(" ");
+    if (!named) {
+      expect(h.chip("rocket")).toHaveAttribute("aria-busy", "true");
+      await waitFor(() => expect(h.people).toHaveBeenCalled());
+      await h.release({ people: [stranger], hasMore: false });
+    }
+    await waitFor(() => expect(h.input()).toHaveValue("@Rocket "));
+    expect(h.chip("rocket")).toBeNull();
+    expect(h.recipients()).toHaveLength(1);
+    h.submit();
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      /Bring Rocket into/,
+    );
+    expect(h.messages.send).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  ["never shows it when one of theirs here has its name", true],
+  ["adds it below the shown rows once theirs here are known", false],
+])(
+  "holds the owner's agent from another community while their agents here load: %s",
+  async (_, namesake) => {
+    const h = mountDirectoryMention({
+      agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Mira" }),
+      channel: { channelType: "stream" },
+    });
+    h.setLibrary([], "loading");
+    h.setProfiles(
+      new Map([
+        [first.pubkey, { name: "Mira" }],
+        [second.pubkey, { name: "Another Member" }],
+      ]),
+    );
+    await h.user.type(h.input(), "@mira");
+    // The member's row installs without waiting.
+    await screen.findByRole("option", { name: /Mira/ });
+    await screen.findByText("Loading recipients…");
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    h.setLibrary(namesake ? [{ pubkey: first.pubkey, name: "Mira" }] : []);
+    await screen.findByText("Searching community…");
+    if (namesake) {
+      expect(screen.getAllByRole("option")).toHaveLength(1);
+      expect(
+        screen.queryByRole("option", { name: /No longer available/ }),
+      ).toBeNull();
+    } else
+      expect(screen.getAllByRole("option").at(-1)).toHaveAccessibleName(
+        /In oss\.example\.com/,
+      );
+  },
+);
+
+it("settles a pending mention into the owner's agent from another community once their agents here load", async () => {
+  const rocket = { pubkey: "e".repeat(64), name: "Rocket" };
+  const h = mountDirectoryMention({
+    agents: elsewhereAgent(rocket),
+    channel: { channelType: "stream" },
+  });
+  h.setLibrary([], "loading");
+  await h.user.type(h.input(), "@rocket");
+  await screen.findByText("Loading recipients…");
+  await h.user.keyboard(" ");
+  expect(h.chip("rocket")).toHaveAttribute("aria-busy", "true");
+  // The directory read stays held: the name settles without it.
+  h.setLibrary([]);
+  await waitFor(() => expect(h.input()).toHaveValue("@Rocket "));
+  expect(h.chip("rocket")).toBeNull();
+  h.submit();
+  expect(await screen.findByRole("dialog")).toHaveTextContent(
+    /Bring Rocket into/,
+  );
 });
 
 it("settles a pending mention into the owner's agent from another community that is archived here, as Tab would", async () => {
@@ -14360,6 +14453,8 @@ it("settles a pending mention into the owner's agent from another community that
       },
     },
   });
+  // Archived here, the agent does not keep its own row from being offered.
+  h.setLibrary([rocket]);
   // A member's name still unknown keeps the chooser from deciding Space.
   h.setProfiles(new Map([[first.pubkey, { name: "Other Member" }]]));
   await h.user.type(h.input(), "@rocket");

@@ -76,7 +76,7 @@ archived and not read-only, the choice set is:
 2. the agents that the client offers for mention in this channel;
 3. the viewer's own agents from their other communities, which the client can
    bring into this one (section 7), except one whose name equals, after
-   normalization (section 5), the name of one of the viewer's unarchived agents
+   normalization (section 3), the name of one of the viewer's unarchived agents
    in this community: that agent already has the name here; and
 4. people and agents found by a community directory search for the current query.
 
@@ -223,27 +223,29 @@ one with no aliases, and of no other choice, and no name continues it: a key
 has no namesakes. Nor does a saved team with the same or a longer name keep it
 from selecting. The steps below then apply as for a name.
 
-The **local** choices are the channel's members and the agents the client
-offers for mention (section 1, items 1 and 2, or a Solo chat's own agent list),
-all known without the directory search. The client selects:
+The **local** choices are the ones known without the directory search: the
+channel's members and the agents the client offers for mention (section 1,
+items 1 to 3, or a Solo chat's own agent list). The client selects:
 
 1. the exact name among the local choices, once every member's name is known
    or known to be absent; otherwise
-2. once the full choice set is known (no directory search for this query is
-   waiting, running, or failed, and the search reported no more pages), the
-   exact name among the full choice set without item 3, or else the exact name
-   among the full choice set.
+2. the exact name among the full choice set, once the full choice set is known:
+   no directory search for this query is waiting, running, or failed, and the
+   search reported no more pages.
 
 In both cases the choice must be shown and can still be chosen. Check against
 the whole set, not only the shown rows.
 
-The viewer's agents from their other communities (section 1, item 3) are also
-known without the search, but they are not local, and they never make a name in
-this community ambiguous: a member named `Jitter` selects although the
-viewer's agent `Jitter` from another community is also a choice. Such an agent
-is the exact name only when no choice in this community has that name, so, like
-a directory result, it waits for the search to finish. Its longer names still
-continue the query.
+Both steps apply this precedence. When a local choice in this community
+(section 1, item 1 or 2) has an alias or label equal to the query, the viewer's
+agents from their other communities (item 3) cannot be the exact name.
+Otherwise, when one of those agents has one, directory results cannot. So a
+member named `Jitter` selects although the viewer's agent `Jitter` from
+another community is also a choice. When nothing local in this community is
+named `Jitter`, that agent selects at once: a directory result named `Jitter`
+cannot make it ambiguous. In step 2, a local choice in this community and a
+directory result with the same name are still namesakes. Every choice's longer
+names still continue the query.
 
 Local choices show before directory results (section 6), so a unique local name
 selects at once: directory results cannot make it ambiguous, whether or not the
@@ -301,6 +303,10 @@ mention is never a recipient or a reference (section 8).
 These rules keep a row from moving under the user's pointer or keyboard.
 
 - Members and offered agents SHOULD show without waiting for the directory.
+- The viewer's agents from their other communities (section 1, item 3) SHOULD
+  show only once the viewer's agents in this community are known, so that the
+  name exception in section 1 never disables a shown row. Until then the agent
+  list is still loading (section 5).
 - A shown row MUST NOT move while the query and the open chooser stay the same.
   New rows are added only at the bottom. Directory people come after the rows
   already shown.
@@ -396,7 +402,7 @@ each choice supplies its own label.
 | --- | --- |
 | `matching` | Section 3. `expected` is the tier of `label` for `query` (0 to 3), or `null` when it does not match. |
 | `ranking` | Sections 3 and 4. `expected` is the full ordered key list. |
-| `space` | Section 5 step 2 over one complete choice set; `elsewhere` marks section 1, item 3. The local-first step is tested only in the desktop UI tests. `expected` is a key or `null`. |
+| `space` | Section 5 step 2 over one complete choice set, with its precedence. Members and choices with `elsewhere` (section 1, item 3) are local; other non-members are directory results. The local-first step is tested only in the desktop UI tests. `expected` is a key or `null`. |
 | `query` | Section 2 syntax. `expected` is `{start, end, query}` or `null`. |
 | `admission` | Section 2 multi-word rule. `expected` is a boolean. |
 | `tags.write` | Section 8 writer. `expected` is the ordered `p` and `mention` tags, or an error class: `not_member`, `invalid`, or `too_many`. The sender is a member in addition to `members`. |

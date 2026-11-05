@@ -1422,6 +1422,51 @@
         }
       ],
       "expected": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "name": "agent_from_another_community_outranks_a_directory_namesake",
+      "query": "Jitter",
+      "choices": [
+        {
+          "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "name": "Jitter",
+          "member": false
+        },
+        {
+          "pubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "name": "Jitter",
+          "member": false,
+          "agent": true,
+          "owned": true,
+          "elsewhere": "other.example.com"
+        }
+      ],
+      "expected": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "name": "member_and_directory_namesake_stay_ambiguous_beside_an_agent_from_another_community",
+      "query": "Jitter",
+      "choices": [
+        {
+          "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "name": "Jitter",
+          "member": true
+        },
+        {
+          "pubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "name": "Jitter",
+          "member": false,
+          "agent": true,
+          "owned": true,
+          "elsewhere": "other.example.com"
+        },
+        {
+          "pubkey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "name": "Jitter",
+          "member": false
+        }
+      ],
+      "expected": null
     }
   ],
   "query": [

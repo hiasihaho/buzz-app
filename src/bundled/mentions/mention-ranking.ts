@@ -242,6 +242,15 @@ export const continuedMention = (
   choices: readonly MentionChoice[],
   query: string,
 ) => continuingNames(choices, query).length > 0;
+/** Whether one of the choice's known names equals the query (README section 5). */
+export function namesQuery(choice: MentionChoice, query: string) {
+  const needle = normalized(query);
+  return (
+    !!needle &&
+    choice.aliases.length > 0 &&
+    choiceNames(choice).some((name) => normalized(name) === needle)
+  );
+}
 /**
  * Space is intent only for one exact key across the full, uncapped choice set.
  * Every choice can continue the name (`continuedMention`); only choices

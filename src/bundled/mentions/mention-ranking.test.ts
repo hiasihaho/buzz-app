@@ -247,14 +247,20 @@ it.each(mentionConformance.ranking)(
 it.each(mentionConformance.space)(
   "conforms to the portable Space contract: $name",
   (fixture) => {
-    // Step 2 of section 5: nothing is local and the full choice set is known.
+    // Step 2 of section 5 over the complete choice set: members and agents
+    // from other communities are local; other choices are directory results.
+    const choices = fixture.choices.map(fixtureChoice);
+    const local = new Set(
+      choices
+        .filter((c) => c.member || c.elsewhere)
+        .map((c) => c.recipient.pubkey),
+    );
     expect(
-      spaceMention(
-        fixture.choices.map(fixtureChoice),
-        new Set(),
-        fixture.query,
-        { pending: false, missingNames: false, complete: true },
-      ) ?? null,
+      spaceMention(choices, local, fixture.query, {
+        pending: false,
+        missingNames: true,
+        complete: true,
+      }) ?? null,
     ).toBe(fixture.expected);
   },
 );
