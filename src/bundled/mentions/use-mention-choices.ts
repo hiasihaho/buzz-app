@@ -22,7 +22,7 @@ import { archivedMention } from "../../features/messages/mention-admission";
 import { mentionHistory } from "../../features/messages/mention-history";
 import {
   directoryChanges,
-  elsewhereHeld,
+  elsewhereMatches,
   managedByDetail,
   mentionCandidates,
   offeredElsewhere,
@@ -269,11 +269,32 @@ export function useMentionChoices(
   // The owner's agents in their other communities; the snapshot is the revision.
   const community = useContext(AgentsContext);
   const revision = useAgentsSnapshot(community);
-  // Holding them loads the owner's agents here, as inviting agents does.
+  // Offering them needs the owner's agents here for the name rule (README
+  // section 1): load those, as inviting agents does.
+  const includeLegacy =
+    open &&
+    (!!invite ||
+      elsewhereMatches(
+        session,
+        channelId,
+        invite,
+        roster,
+        community?.joinable(),
+      ));
+  const agents = useAgentChoices(session, includeLegacy);
+  // Until those are known they are held; only a query one of them matches
+  // waits (README section 6).
   const held =
     open &&
-    elsewhereHeld(session, channelId, invite, roster, community?.joinable());
-  const agents = useAgentChoices(session, (!!invite || held) && open);
+    agents.pending &&
+    elsewhereMatches(
+      session,
+      channelId,
+      invite,
+      roster,
+      community?.joinable(),
+      query,
+    );
   const profiles = useSyncExternalStore(
     session.profiles.subscribe,
     session.profiles.snapshot,
@@ -468,16 +489,19 @@ export function useMentionChoices(
       (key) => session.presence?.status(key) ?? "unknown",
       MENTION_ROWS,
     );
-  // Rows that may arrive after the list installs: directory people, and the
-  // owner's agents from other communities once no longer held. Ranked only
+  // Rows that may arrive after the list installs: the owner's agents from
+  // other communities once no longer held, then directory people, which wait
+  // with them so that local rows stay above (README section 6). Ranked only
   // when read: a full set of installed rows never needs outside choices.
   let outsideRows: readonly MentionChoice[] | undefined;
   const outside = () =>
-    (outsideRows ??= open
-      ? rank(
-          matches.filter((c) => !local.has(c.recipient.pubkey) || c.elsewhere),
-        )
-      : []);
+    (outsideRows ??=
+      open && !held
+        ? [
+            ...rank(matches.filter((c) => c.elsewhere)),
+            ...rank(matches.filter((c) => !local.has(c.recipient.pubkey))),
+          ]
+        : []);
   // A member a completed read found no profile for has no name to be a namesake.
   const missingNames =
     open &&
@@ -553,6 +577,8 @@ export function useMentionChoices(
       managedBy,
       list,
       agents,
+      /** Whether this chooser reads the legacy agent library; Retry rereads it. */
+      includeLegacy,
       channel,
       roster,
       candidates,
@@ -587,6 +613,7 @@ export function useMentionChoices(
     managedBy,
     list,
     agents,
+    includeLegacy,
     channel,
     roster,
     pending,

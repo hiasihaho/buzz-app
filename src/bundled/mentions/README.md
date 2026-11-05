@@ -304,9 +304,12 @@ These rules keep a row from moving under the user's pointer or keyboard.
 
 - Members and offered agents SHOULD show without waiting for the directory.
 - The viewer's agents from their other communities (section 1, item 3) SHOULD
-  show only once the viewer's agents in this community are known, so that the
-  name exception in section 1 never disables a shown row. Until then the agent
-  list is still loading (section 5).
+  show only while the viewer's agents in this community are known, so that,
+  once those are known, the name exception in section 1 does not disable a
+  shown row. While those load, a query that matches (section 3) the name of one
+  of the viewer's agents from other communities waits: the agent list is still
+  loading (section 5), and directory people wait too, so those agents still
+  show before directory people.
 - A shown row MUST NOT move while the query and the open chooser stay the same.
   New rows are added only at the bottom. Directory people come after the rows
   already shown.

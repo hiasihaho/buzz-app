@@ -8,7 +8,7 @@ import {
 import { knownAgentPubkeys } from "../../features/agents/known";
 import type { Agent } from "../../features/agents/service";
 import { communityHost } from "../../features/messages/community-host";
-import { normalizeName } from "../../features/search/person-match";
+import { matchPerson, normalizeName } from "../../features/search/person-match";
 import {
   allowsOutsideMentions,
   archivedMention,
@@ -77,7 +77,7 @@ const none: readonly never[] = [];
  * The owner's agents from their other communities that the chooser offers by
  * name (README section 1): none named like one of the owner's unarchived
  * agents here, which already has that name. Teams still reach them by key.
- * None until the owner's agents here are known (`elsewhereHeld`).
+ * None until the owner's agents here are known (`elsewhereMatches`).
  */
 export function offeredElsewhere(
   session: ComposerSession,
@@ -95,32 +95,29 @@ export function offeredElsewhere(
 }
 
 /**
- * Whether the chooser holds back the owner's agents from other communities it
- * would offer here while the owner's agents here load, so that a row it shows
- * never leaves under the name rule (README section 6). Until then the agent
- * list is loading: Space waits as for invited agents.
+ * Whether the chooser would offer here one of the owner's agents from other
+ * communities that `query` matches (any, for no query). Their name rule needs
+ * the owner's agents here, so the chooser loads those and holds such agents
+ * until they are known (README section 6). Meanwhile, for a query they match,
+ * the agent list is loading: Space waits as for invited agents.
  */
-export function elsewhereHeld(
+export function elsewhereMatches(
   session: ComposerSession,
   channelId: string,
   inviteAgents: boolean | undefined,
   roster: readonly MentionRecipient[] | undefined,
   elsewhere: readonly ElsewhereAgent[] | undefined,
+  query = "",
 ) {
-  if (
-    roster ||
-    inviteAgents ||
-    !elsewhere?.length ||
-    !session.agentChoices.snapshot().pending
-  )
-    return false;
+  if (roster || inviteAgents || !elsewhere?.length) return false;
   const channel = session.channels
     .list()
     .channels.find((c) => c.id === channelId);
-  return (
-    availableMentionAgents(channel, elsewhere, session.outbox?.supports(9000))
-      .length > 0
-  );
+  return availableMentionAgents(
+    channel,
+    elsewhere,
+    session.outbox?.supports(9000),
+  ).some((agent) => !!matchPerson(agent.name, query));
 }
 
 // Rows change only with their sources, not with each keystroke. Snapshots are

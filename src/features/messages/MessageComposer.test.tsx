@@ -548,9 +548,11 @@ function mount(
     setLibrary(
       identities: AgentLibrarySnapshot["identities"],
       status: AgentLibrarySnapshot["status"] = "ready",
+      error?: string,
     ) {
       act(() => {
-        library = { ...library, identities, status };
+        const { error: _, ...rest } = library;
+        library = { ...rest, identities, status, ...(error ? { error } : {}) };
         for (const listener of libraryListeners) listener();
       });
     },
@@ -14415,6 +14417,98 @@ it.each([
       );
   },
 );
+
+it.each([
+  ["Space", " "],
+  ["Enter", "{Enter}"],
+])(
+  "shows the owner's agent from another community above a namesake the search found while their agents here load, and %s picks it",
+  async (_, key) => {
+    const rocket = { pubkey: "e".repeat(64), name: "Rocket" };
+    const stranger = { pubkey: "d".repeat(64), name: "Rocket" };
+    const h = mountDirectoryMention({
+      agents: elsewhereAgent(rocket),
+      channel: { channelType: "stream" },
+    });
+    h.setLibrary([], "loading");
+    await h.user.type(h.input(), "@rocket");
+    await waitFor(() => expect(h.people).toHaveBeenCalled());
+    // The search finds the stranger before the owner's agents here load.
+    await h.release({ people: [stranger], hasMore: false });
+    h.setLibrary([]);
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(2));
+    const [top, below] = screen.getAllByRole("option");
+    expect(top).toHaveAccessibleName(/In oss\.example\.com/);
+    expect(below).toHaveAccessibleName(/Not in channel/);
+    await h.user.keyboard(key);
+    await waitFor(() => expect(h.input()).toHaveValue("@Rocket "));
+    expect(h.recipients()).toHaveLength(1);
+    h.submit();
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      /Bring Rocket into/,
+    );
+    expect(h.messages.send).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  ["from the chooser", true],
+  ["once the pending name resolves", false],
+])(
+  "tags a member while the owner's agents here load when no agent from another community matches, %s",
+  async (_, named) => {
+    const h = mountDirectoryMention({
+      agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Rocket" }),
+      channel: { channelType: "stream" },
+    });
+    h.setLibrary([], "loading");
+    h.setProfiles(
+      new Map([
+        [first.pubkey, { name: "Alice" }],
+        ...(named
+          ? [[second.pubkey, { name: "Another Member" }] as const]
+          : []),
+      ]),
+    );
+    await h.user.type(h.input(), "@alice");
+    await screen.findByRole("option", { name: /Alice/ });
+    // Only a query such an agent matches waits for the owner's agents here.
+    await screen.findByText("Searching community…");
+    await h.user.keyboard(" ");
+    if (named) expect(h.input()).toHaveValue("@Alice ");
+    else {
+      // A member's name still unknown keeps the chooser from deciding Space.
+      expect(h.chip("alice")).toHaveAttribute("aria-busy", "true");
+      await waitFor(() => expect(h.people).toHaveBeenCalled());
+      await h.release({ people: [], hasMore: false });
+      await waitFor(() => expect(h.input()).toHaveValue("@Alice "));
+    }
+    expect(h.chip("alice")).toBeNull();
+    expect(h.recipients()).toHaveLength(1);
+  },
+);
+
+it("rereads the agent library on Retry when it failed and the owner has agents in other communities", async () => {
+  const h = mountDirectoryMention({
+    agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Rocket" }),
+    channel: { channelType: "stream" },
+  });
+  h.setLibrary([], "error", "Could not read agent inventory.");
+  await h.user.type(h.input(), "@rocket");
+  await screen.findByText("Could not load agents. Retry to refresh.");
+  expect(h.session.agentLibrary.refresh).not.toHaveBeenCalled();
+  await h.user.click(screen.getByRole("option", { name: "Retry suggestions" }));
+  expect(h.session.agentLibrary.refresh).toHaveBeenCalledOnce();
+  h.setLibrary([]);
+  await waitFor(() =>
+    expect(
+      screen.queryByText("Could not load agents. Retry to refresh."),
+    ).toBeNull(),
+  );
+  expect(
+    screen.getByRole("option", { name: /In oss\.example\.com/ }),
+  ).toHaveAttribute("aria-disabled", "false");
+});
 
 it("settles a pending mention into the owner's agent from another community once their agents here load", async () => {
   const rocket = { pubkey: "e".repeat(64), name: "Rocket" };

@@ -7,7 +7,7 @@ import type { MentionRecipient } from "../../features/messages/mention-draft";
 import type { MentionRoster } from "../../features/messages/draft-mention-roster";
 import type { Agent } from "../../features/agents/service";
 import {
-  elsewhereHeld,
+  elsewhereMatches,
   mentionCandidates,
   offeredElsewhere,
 } from "./mention-candidates";
@@ -132,10 +132,11 @@ async function resolve(
       )
       .catch(() => {});
   // The chooser holds the owner's agents from other communities until all of
-  // the owner's agents here are known; invited agents may be partial.
+  // the owner's agents here are known, for a name one of them matches;
+  // invited agents may be partial.
   if (
     invite ||
-    elsewhereHeld(session, channelId, inviteAgents, roster, elsewhere)
+    elsewhereMatches(session, channelId, inviteAgents, roster, elsewhere, name)
   ) {
     const release = session.agentChoices.retain();
     try {
