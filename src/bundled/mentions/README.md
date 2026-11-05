@@ -304,14 +304,18 @@ These rules keep a row from moving under the user's pointer or keyboard.
 
 - Members and offered agents SHOULD show without waiting for the directory.
 - The viewer's agents from their other communities (section 1, item 3) SHOULD
-  show only while the viewer's agents in this community are known, so that,
-  once those are known, the name exception in section 1 does not disable a
-  shown row. While those load, a query that matches (section 3) the name of one
-  of the viewer's agents from other communities waits: the agent list is still
-  loading (section 5), and directory people wait too, so those agents still
-  show before directory people. A client SHOULD start loading the viewer's
-  agents here when a composer that offers such agents opens, so that this wait
-  is rare.
+  show only while the viewer's agents in this community are known from a
+  complete read, so that, once those are known, the name exception in section 1
+  does not disable a shown row. A failed or partial read is not evidence: it
+  may omit the agent here that has the name. Until such a read, a query that
+  matches (section 3) the name of one of the viewer's agents from other
+  communities holds them, and directory people with them, so those agents
+  still show before directory people. While the read runs, the agent list is
+  still loading (section 5). Once it fails, the full choice set stays unknown
+  for that query: only the local step of section 5 applies, over the local
+  choices the client has, and a retry reads again. A client SHOULD start
+  loading the viewer's agents here when a composer that offers such agents
+  opens, so that this wait is rare.
 - A shown row MUST NOT move while the query and the open chooser stay the same.
   New rows are added only at the bottom. Directory people come after the rows
   already shown.

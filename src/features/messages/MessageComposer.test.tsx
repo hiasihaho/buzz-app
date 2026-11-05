@@ -14554,6 +14554,130 @@ it("rereads the agent library on Retry when it failed and the owner has agents i
   ).toHaveAttribute("aria-disabled", "false");
 });
 
+it.each([
+  ["from the chooser", true],
+  ["once the pending name resolves", false],
+])(
+  "never offers the owner's agent from another community while reading their agents here fails, and tags their namesake here once Retry finds it, %s",
+  async (_, named) => {
+    // The owner's agent here is only in the library, which the failed read omits.
+    const jitter = { pubkey: "f".repeat(64), name: "Jitter" };
+    const h = mountDirectoryMention({
+      agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Jitter" }),
+      channel: { channelType: "stream" },
+    });
+    h.setLibrary([], "error", "Could not read agent inventory.");
+    // A member's name still unknown keeps the chooser from deciding Space.
+    if (!named)
+      h.setProfiles(new Map([[first.pubkey, { name: "Other Member" }]]));
+    await h.user.type(h.input(), "@jitter");
+    await screen.findByText("Could not load agents. Retry to refresh.");
+    expect(
+      screen.queryByRole("option", { name: /In oss\.example\.com/ }),
+    ).toBeNull();
+    await waitFor(() => expect(h.people).toHaveBeenCalled());
+    // A settled search leaves the chooser nothing to wait for.
+    if (named) await h.release({ people: [], hasMore: false });
+    // The resolver first reads the members' names; hold it there.
+    const names = deferred<void>();
+    onTestFinished(() => names.resolve());
+    if (!named)
+      vi.mocked(h.session.profiles.ensure).mockImplementationOnce(
+        () => names.promise,
+      );
+    await h.user.keyboard(" ");
+    if (!named) {
+      expect(h.chip("jitter")).toHaveAttribute("aria-busy", "true");
+      await act(async () => names.resolve());
+      await h.release({ people: [], hasMore: false });
+    }
+    // Neither tags the other community's agent: the text stays prose.
+    await waitFor(() => expect(h.chip("jitter")).toBeNull());
+    expect(h.input()).toHaveValue("@jitter ");
+    expect(
+      screen.queryByRole("region", { name: "Explicit mentions" }),
+    ).toBeNull();
+    await h.user.keyboard("@jitter");
+    await screen.findByText("Could not load agents. Retry to refresh.");
+    await h.user.click(
+      screen.getByRole("option", { name: "Retry suggestions" }),
+    );
+    expect(h.session.agentLibrary.refresh).toHaveBeenCalledOnce();
+    h.setLibrary([jitter]);
+    // Only the owner's agent here. Its namesake was never shown, so no row
+    // is disabled.
+    expect(
+      await screen.findByRole("option", { name: /Jitter/ }),
+    ).toHaveAccessibleName(/Not in channel/);
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    await h.user.keyboard(" ");
+    if (!named) {
+      expect(h.chip("jitter")).toHaveAttribute("aria-busy", "true");
+      await h.release({ people: [], hasMore: false });
+    }
+    await waitFor(() => expect(h.input()).toHaveValue("@jitter @Jitter "));
+    expect(h.chip("jitter")).toBeNull();
+    expect(h.recipients()).toHaveLength(1);
+    h.submit();
+    // Not "Bring Jitter into": the agent here is the recipient.
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "Jitter is not in this channel.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send anyway" }));
+    await act(async () => {});
+    expect(h.messages.send).toHaveBeenCalledOnce();
+    expect(h.messages.send.mock.calls[0]?.at(-1)).toEqual([jitter.pubkey]);
+  },
+);
+
+it.each([
+  ["from the chooser", true],
+  ["once the pending name resolves", false],
+])(
+  "keeps a namesake the search found from taking Space while reading the owner's agents here fails, %s",
+  async (_, named) => {
+    // Had the read listed them, the owner's own Jitter, here or in another
+    // community, would outrank this one: the full choice set is unknown.
+    const stranger = { pubkey: "d".repeat(64), name: "Jitter" };
+    const h = mountDirectoryMention({
+      agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Jitter" }),
+      channel: { channelType: "stream" },
+    });
+    h.setLibrary([], "error", "Could not read agent inventory.");
+    // A member's name still unknown keeps the chooser from deciding Space.
+    if (!named)
+      h.setProfiles(new Map([[first.pubkey, { name: "Other Member" }]]));
+    await h.user.type(h.input(), "@jitter");
+    await screen.findByText("Could not load agents. Retry to refresh.");
+    await waitFor(() => expect(h.people).toHaveBeenCalled());
+    if (named) {
+      await h.release({ people: [stranger], hasMore: false });
+      // It waits with the other community's agent.
+      expect(
+        screen.queryByRole("option", { name: /Not in channel/ }),
+      ).toBeNull();
+    }
+    // The resolver first reads the members' names; hold it there.
+    const names = deferred<void>();
+    onTestFinished(() => names.resolve());
+    if (!named)
+      vi.mocked(h.session.profiles.ensure).mockImplementationOnce(
+        () => names.promise,
+      );
+    await h.user.keyboard(" ");
+    if (!named) {
+      expect(h.chip("jitter")).toHaveAttribute("aria-busy", "true");
+      await act(async () => names.resolve());
+      await h.release({ people: [stranger], hasMore: false });
+    }
+    await waitFor(() => expect(h.chip("jitter")).toBeNull());
+    expect(h.input()).toHaveValue("@jitter ");
+    expect(
+      screen.queryByRole("region", { name: "Explicit mentions" }),
+    ).toBeNull();
+  },
+);
+
 it("keeps the agent library on a Retry that does not need it", async () => {
   const h = mountDirectoryMention({
     agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Rocket" }),

@@ -77,7 +77,8 @@ const none: readonly never[] = [];
  * The owner's agents from their other communities that the chooser offers by
  * name (README section 1): none named like one of the owner's unarchived
  * agents here, which already has that name. Teams still reach them by key.
- * None until the owner's agents here are known (`elsewhereMatches`).
+ * None until a complete read lists the owner's agents here (`elsewhereMatches`):
+ * a failed or partial one may omit the agent that has the name.
  */
 export function offeredElsewhere(
   session: ComposerSession,
@@ -85,7 +86,7 @@ export function offeredElsewhere(
 ) {
   if (!elsewhere?.length) return elsewhere;
   const agents = session.agentChoices.snapshot();
-  if (agents.pending) return none;
+  if (!agents.complete) return none;
   const here = new Set(
     agents.identities
       .filter((agent) => !archivedMention(session, agent.pubkey))
@@ -99,7 +100,8 @@ export function offeredElsewhere(
  * communities that `query` matches (any, for no query). Their name rule needs
  * the owner's agents here, so the chooser loads those and holds such agents
  * until they are known (README section 6). Meanwhile, for a query they match,
- * the agent list is loading: Space waits as for invited agents.
+ * the agent list is loading: Space waits as for invited agents. After a failed
+ * read only local choices here can take Space.
  */
 export function elsewhereMatches(
   session: ComposerSession,

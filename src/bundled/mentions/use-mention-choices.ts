@@ -216,7 +216,8 @@ export type SpaceEvidence = {
   pending: boolean;
   /** A member's name is neither known nor known to be absent. */
   missingNames: boolean | undefined;
-  /** The directory search for this query settled with no more pages. */
+  /** The full choice set is known: the directory search for this query
+   * settled with no more pages, and no agents from other communities are held. */
   complete: boolean;
 };
 /**
@@ -276,11 +277,13 @@ export function useMentionChoices(
     (open && !!invite) ||
     elsewhereMatches(session, channelId, invite, roster, community?.joinable());
   const agents = useAgentChoices(session, includeLegacy);
-  // Until those are known they are held; only a query one of them matches
-  // waits (README section 6).
+  // Until a complete read lists those, they are held, and directory people
+  // with them, for a query one of them matches (README section 6). Only a read
+  // in progress is loading: after a failure, local choices stay usable and
+  // Retry reads again.
   const held =
     open &&
-    agents.pending &&
+    !agents.complete &&
     elsewhereMatches(
       session,
       channelId,
@@ -427,7 +430,7 @@ export function useMentionChoices(
     membersPending ||
     !!draft?.pending ||
     (!roster && !!invite && agents.pending && agents.status !== "ready") ||
-    held;
+    (held && agents.pending);
   let rows = same ? installed.rows : undefined;
   if (!same && installed) install(undefined);
   // Only choices the query can match; ranking reads no others.
@@ -542,6 +545,7 @@ export function useMentionChoices(
     }
   }
   const complete =
+    !held &&
     !directory.loading &&
     !directory.error &&
     !directory.more &&

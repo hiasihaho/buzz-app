@@ -131,13 +131,18 @@ async function resolve(
         "background",
       )
       .catch(() => {});
-  // The chooser holds the owner's agents from other communities until all of
-  // the owner's agents here are known, for a name one of them matches;
-  // invited agents may be partial.
-  if (
-    invite ||
-    elsewhereMatches(session, channelId, inviteAgents, roster, elsewhere, name)
-  ) {
+  // The chooser holds the owner's agents from other communities until a
+  // complete read lists the owner's agents here, for a name one of them
+  // matches; invited agents may be partial.
+  const elsewhereNamed = elsewhereMatches(
+    session,
+    channelId,
+    inviteAgents,
+    roster,
+    elsewhere,
+    name,
+  );
+  if (invite || elsewhereNamed) {
     const release = session.agentChoices.retain();
     try {
       session.agentChoices.ensure(true);
@@ -222,6 +227,9 @@ async function resolve(
   // directory, as it does in the chooser.
   const direct = decide([], false, name);
   if (direct) return direct;
+  // A failed read keeps them held, and directory people with them: the full
+  // choice set stays unknown, as in the chooser.
+  if (elsewhereNamed && !session.agentChoices.snapshot().complete) return null;
   const outside =
     !roster &&
     !invite &&
