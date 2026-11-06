@@ -1,4 +1,4 @@
-import type { BuilderlabViewerSession } from "./api";
+import type { BrowserGuest, BuilderlabViewerSession } from "./api";
 import type { BrowserBounds, BrowserPlatform } from "./platform";
 
 /** Native guests open at once; past this the least recently shown hidden one
@@ -138,6 +138,23 @@ export class BrowserSessions {
   /** Whether this session's guest is still open. */
   owns(sessionId: string): boolean {
     return this.live.includes(sessionId);
+  }
+
+  /** Live guests with their status, most recently shown first; one that
+   * closes mid-listing is left out. */
+  async guests(): Promise<readonly BrowserGuest[]> {
+    const ids = [...this.live].reverse();
+    const guests = await Promise.all(
+      ids.map(async (id): Promise<BrowserGuest | null> => {
+        try {
+          const { url, title, loading } = await this.platform.status(id);
+          return { id, url, title, loading };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return guests.filter((guest): guest is BrowserGuest => guest !== null);
   }
 
   /** A view reports whether it is showing its guest. */

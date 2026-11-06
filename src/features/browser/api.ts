@@ -24,9 +24,24 @@ export type BrowserViewProps = Readonly<{
   label?: string | undefined;
 }>;
 
+/** A live website guest, as host automation sees it. */
+export type BrowserGuest = Readonly<{
+  id: string;
+  url: string;
+  title: string;
+  loading: boolean;
+}>;
+
 export interface Browser {
   readonly available: boolean;
   readonly View: ComponentType<BrowserViewProps>;
+  /** The live guests, most recently shown first; one that closes
+   * mid-listing is left out. */
+  guests(): Promise<readonly BrowserGuest[]>;
+  /** Runs `script` in a guest's page scope and resolves with its
+   * JSON-serializable return value; page exceptions reject. Only the host
+   * and plugins can evaluate — website JavaScript never reaches this. */
+  evaluate(sessionId: string, script: string): Promise<unknown>;
 }
 
 declare module "@deepseek-ai/cordis" {

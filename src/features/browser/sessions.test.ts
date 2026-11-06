@@ -404,3 +404,47 @@ it("does not re-adopt a parked guest before its previous hide completes", async 
     await sessions.detach("a");
   }
 });
+
+it("lists live guests most recently shown first", async () => {
+  const browserPlatform = platform();
+  vi.mocked(browserPlatform.attach)
+    .mockResolvedValueOnce("one")
+    .mockResolvedValueOnce("two")
+    .mockResolvedValueOnce("three");
+  vi.mocked(browserPlatform.status).mockImplementation(async (id) => ({
+    url: `https://${id}.example/`,
+    title: id,
+    loading: false,
+    error: null,
+  }));
+  const sessions = new BrowserSessions(browserPlatform);
+  await sessions.attach("https://one.example", bounds, () => true);
+  await sessions.attach("https://two.example", bounds, () => true);
+  await sessions.attach("https://three.example", bounds, () => true);
+  sessions.present("two", true);
+  const guests = await sessions.guests();
+  expect(guests.map((guest) => guest.id)).toEqual(["two", "three", "one"]);
+});
+
+it("leaves a guest that closes mid-listing out", async () => {
+  const browserPlatform = platform();
+  vi.mocked(browserPlatform.attach)
+    .mockResolvedValueOnce("one")
+    .mockResolvedValueOnce("two");
+  vi.mocked(browserPlatform.status).mockImplementation(async (id) => {
+    if (id === "one")
+      throw new Error("Browser session is closed or replaced");
+    return {
+      url: "https://two.example/",
+      title: "Two",
+      loading: false,
+      error: null,
+    };
+  });
+  const sessions = new BrowserSessions(browserPlatform);
+  await sessions.attach("https://one.example", bounds, () => true);
+  await sessions.attach("https://two.example", bounds, () => true);
+  await expect(sessions.guests()).resolves.toEqual([
+    { id: "two", url: "https://two.example/", title: "Two", loading: false },
+  ]);
+});

@@ -30,3 +30,16 @@ it("exposes availability and a host View", () => {
   expect(context.browser.available).toBe(true);
   expect(typeof context.browser.View).toBe("function");
 });
+
+it("delegates guests and evaluate for host automation", async () => {
+  const context = new Context();
+  contexts.push(context);
+  const browserPlatform = platform(true);
+  vi.mocked(browserPlatform.evaluate).mockResolvedValue(2);
+  new BrowserService(context, browserPlatform);
+  await expect(context.browser.guests()).resolves.toEqual([]);
+  await expect(context.browser.evaluate("session-1", "1 + 1")).resolves.toBe(
+    2,
+  );
+  expect(browserPlatform.evaluate).toHaveBeenCalledWith("session-1", "1 + 1");
+});
