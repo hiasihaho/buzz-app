@@ -6,6 +6,8 @@ All example plugins live here with `manifest.json` and prebuilt `plugin.js` file
 - `shortcut-counter`: offline keyboard-shortcut consumer; Command+Shift+G /
   Control+Shift+G increments through the injected host service. Requires `shortcuts`.
 - `broken-page`: intentionally fails when its page renders to exercise error handling.
+- `browser`: opens any `https://` link in a side panel through the browser
+  capability. Unlike the other examples it loads remote websites over the network.
 
 ## Try the offline playgrounds
 
