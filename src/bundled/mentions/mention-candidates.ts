@@ -101,7 +101,9 @@ export function offeredElsewhere(
  * the owner's agents here, so the chooser loads those and holds such agents
  * until they are known (README section 6). Meanwhile, for a query they match,
  * the agent list is loading: Space waits as for invited agents. After a failed
- * read only local choices here can take Space.
+ * read only local choices here can take Space. An agent matches by the names
+ * its row has without the directory (`buildCandidates` aliases), such as the
+ * name cached here for one archived here.
  */
 export function elsewhereMatches(
   session: ComposerSession,
@@ -115,11 +117,22 @@ export function elsewhereMatches(
   const channel = session.channels
     .list()
     .channels.find((c) => c.id === channelId);
+  const profiles = session.profiles.snapshot();
+  const here = session.agentChoices.snapshot().identities;
   return availableMentionAgents(
     channel,
     elsewhere,
     session.outbox?.supports(9000),
-  ).some((agent) => !!matchPerson(agent.name, query));
+  ).some((agent) => {
+    const profile = profiles.get(agent.pubkey);
+    return [
+      agent.name,
+      profile?.name,
+      profile?.verified?.fullName,
+      profile?.verified?.username,
+      ...here.flatMap((a) => (a.pubkey === agent.pubkey ? [a.name] : [])),
+    ].some((name) => name !== undefined && !!matchPerson(name, query));
+  });
 }
 
 // Rows change only with their sources, not with each keystroke. Snapshots are

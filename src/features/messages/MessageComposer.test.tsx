@@ -14463,6 +14463,67 @@ it.each([
 );
 
 it.each([
+  ["from the chooser", true],
+  ["once the pending name resolves", false],
+])(
+  "adds the owner's agent here that loads after a longer member name shows, above directory people, and tags it, %s",
+  async (_, loaded) => {
+    // The owner's agent here is only in the library, so it loads after the
+    // member's row installs. Its namesake from another community is never
+    // offered.
+    const jitter = { pubkey: "f".repeat(64), name: "Jitter" };
+    const h = mountDirectoryMention({
+      agents: elsewhereAgent({ pubkey: "e".repeat(64), name: "Jitter" }),
+      channel: { channelType: "stream" },
+    });
+    h.setLibrary([], "loading");
+    h.setProfiles(
+      new Map([
+        [first.pubkey, { name: "Jitterbug" }],
+        [second.pubkey, { name: "Another Member" }],
+      ]),
+    );
+    await h.user.type(h.input(), "@jitter");
+    await screen.findByRole("option", { name: /Jitterbug/ });
+    await screen.findByText("Loading recipients…");
+    if (loaded) {
+      // The search settles first; its people wait with the held rows.
+      await waitFor(() => expect(h.people).toHaveBeenCalled());
+      await h.release({
+        people: [{ pubkey: "d".repeat(64), name: "Jitterbird" }],
+        hasMore: false,
+      });
+      expect(screen.getAllByRole("option")).toHaveLength(1);
+    } else {
+      await h.user.keyboard(" ");
+      expect(h.chip("jitter")).toHaveAttribute("aria-busy", "true");
+    }
+    h.setLibrary([jitter]);
+    if (loaded) {
+      await waitFor(() =>
+        expect(screen.getAllByRole("option")).toHaveLength(3),
+      );
+      const [member, here, found] = screen.getAllByRole("option");
+      expect(member).toHaveAccessibleName(/Jitterbug/);
+      expect(here).toHaveAccessibleName(/^JitterAgentNot in channel/);
+      expect(found).toHaveAccessibleName(/Jitterbird/);
+      await h.user.keyboard(" ");
+    }
+    await waitFor(() => expect(h.input()).toHaveValue("@Jitter "));
+    expect(h.chip("jitter")).toBeNull();
+    expect(h.recipients()).toHaveLength(1);
+    h.submit();
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "Jitter is not in this channel.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send anyway" }));
+    await act(async () => {});
+    expect(h.messages.send).toHaveBeenCalledOnce();
+    expect(h.messages.send.mock.calls[0]?.at(-1)).toEqual([jitter.pubkey]);
+  },
+);
+
+it.each([
   ["Space", " "],
   ["Enter", "{Enter}"],
 ])(
@@ -14494,6 +14555,89 @@ it.each([
     expect(h.messages.send).not.toHaveBeenCalled();
   },
 );
+
+/**
+ * The owner's agent Rocket from another community was archived here as Comet,
+ * the name cached here. The search finds a stranger named Comet. The owner's
+ * agents here are loading; `load()` lists the archived one.
+ */
+function mountCachedAlias() {
+  const rocket = { pubkey: "e".repeat(64), name: "Rocket" };
+  const archives = { status: "ready" as const, archived: [rocket.pubkey] };
+  const h = mountDirectoryMention({
+    agents: elsewhereAgent(rocket),
+    channel: { channelType: "stream" },
+    session: {
+      archives: {
+        snapshot: () => archives,
+        subscribe: () => () => {},
+        state: (key: string) =>
+          key === rocket.pubkey ? "archived" : "not-archived",
+        ensure: async () => {},
+      },
+    },
+  });
+  h.setLibrary([], "loading");
+  h.setProfiles(
+    new Map([
+      [first.pubkey, { name: "Other Member" }],
+      [second.pubkey, { name: "Another Member" }],
+      [rocket.pubkey, { name: "Comet" }],
+    ]),
+  );
+  return {
+    ...h,
+    stranger: { pubkey: "d".repeat(64), name: "Comet" },
+    load: () => h.setLibrary([{ pubkey: rocket.pubkey, name: "Comet" }]),
+  };
+}
+
+it.each([
+  ["Space", " "],
+  ["Enter", "{Enter}"],
+])(
+  "holds a namesake the search found for the name cached here for the owner's agent from another community, and %s picks that agent",
+  async (_, key) => {
+    const h = mountCachedAlias();
+    await h.user.type(h.input(), "@comet");
+    await waitFor(() => expect(h.people).toHaveBeenCalled());
+    await h.release({ people: [h.stranger], hasMore: false });
+    // The stranger waits with the owner's agent.
+    await screen.findByText("Loading recipients…");
+    expect(screen.queryByRole("option", { name: /Comet|Rocket/ })).toBeNull();
+    h.load();
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(2));
+    const [top, below] = screen.getAllByRole("option");
+    expect(top).toHaveAccessibleName(/In oss\.example\.com/);
+    expect(below).toHaveAccessibleName(/Not in channel/);
+    await h.user.keyboard(key);
+    await waitFor(() => expect(h.input()).toHaveValue("@Rocket "));
+    expect(h.recipients()).toHaveLength(1);
+    h.submit();
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      /Bring Rocket into/,
+    );
+    expect(h.messages.send).not.toHaveBeenCalled();
+  },
+);
+
+it("settles a pending mention of the name cached here for the owner's agent from another community into that agent, not a namesake the search found", async () => {
+  const h = mountCachedAlias();
+  await h.user.type(h.input(), "@comet");
+  // The chooser is open and searching.
+  await waitFor(() => expect(h.people).toHaveBeenCalled());
+  await h.user.keyboard(" ");
+  expect(h.chip("comet")).toHaveAttribute("aria-busy", "true");
+  h.load();
+  // Answers the chooser's search, and the resolver's had it read the directory.
+  await h.release({ people: [h.stranger], hasMore: false });
+  await waitFor(() => expect(h.input()).toHaveValue("@Rocket "));
+  expect(h.chip("comet")).toBeNull();
+  h.submit();
+  expect(await screen.findByRole("dialog")).toHaveTextContent(
+    /Bring Rocket into/,
+  );
+});
 
 it.each([
   ["from the chooser", true],

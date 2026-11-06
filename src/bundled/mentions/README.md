@@ -308,9 +308,11 @@ These rules keep a row from moving under the user's pointer or keyboard.
   complete read, so that, once those are known, the name exception in section 1
   does not disable a shown row. A failed or partial read is not evidence: it
   may omit the agent here that has the name. Until such a read, a query that
-  matches (section 3) the name of one of the viewer's agents from other
+  matches (section 3) a name of one of the viewer's agents from other
   communities holds them, and directory people with them, so those agents
-  still show before directory people. While the read runs, the agent list is
+  still show before directory people. Its names are the ones its row has
+  without the directory search, including aliases cached in this community,
+  such as the profile name of an agent archived here. While the read runs, the agent list is
   still loading (section 5). Once it fails, the full choice set stays unknown
   for that query: only the local step of section 5 applies, over the local
   choices the client has, and a retry reads again. A client SHOULD start
@@ -318,7 +320,9 @@ These rules keep a row from moving under the user's pointer or keyboard.
   opens, so that this wait is rare.
 - A shown row MUST NOT move while the query and the open chooser stay the same.
   New rows are added only at the bottom. Directory people come after the rows
-  already shown.
+  already shown. Offered agents (section 1, item 2) that load after the list
+  is shown are added too, before the viewer's agents from other communities
+  and the directory people added with them.
 - A row that becomes unavailable stays in place and is disabled. Enter and Tab
   MUST NOT select it or fall through to Send.
 - A client MAY show at most 50 rows and ask the user to type more.
