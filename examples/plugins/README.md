@@ -6,6 +6,10 @@ All example plugins live here with `manifest.json` and prebuilt `plugin.js` file
 - `shortcut-counter`: offline keyboard-shortcut consumer; Command+Shift+G /
   Control+Shift+G increments through the injected host service. Requires `shortcuts`.
 - `broken-page`: intentionally fails when its page renders to exercise error handling.
+- `qbc-browser`: agent browser automation over the `ctx.browser` guest contract —
+  nine `qbc_*` tools (guests, snapshot, click, type, eval, navigate, wait, scroll,
+  console) passing the automation policy gate. Requires the embedded browser and
+  the master switch in Settings → Security; every grant is approved from the panel.
 
 ## Try the offline playgrounds
 

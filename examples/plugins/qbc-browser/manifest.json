@@ -1,0 +1,6 @@
+{
+  "id": "qbc.browser",
+  "name": "QBC browser automation",
+  "apiVersion": 1,
+  "description": "Agent tools for the embedded browser: list website guests, snapshot interactive elements to stable refs (also marked as data-qbc-ref in the page), click them, type into text fields, navigate, wait for selectors, scroll, read the page console, and evaluate page JavaScript. Every call passes the host's automation policy gate (grants, rate limit, audit)."
+}
