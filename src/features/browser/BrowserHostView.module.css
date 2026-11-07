@@ -94,6 +94,58 @@
   overflow: hidden;
 }
 
+/* Agent-access framing lives in the host chrome: the native guest covers the
+   viewport itself, so the accent line runs along the toolbar and the foot. */
+.browser[data-agent-access] .toolbar {
+  border-bottom-color: var(--border-accent);
+}
+
+.agentStrip {
+  flex: none;
+  height: 2px;
+  background: var(--border-accent);
+}
+
+.accessBadge {
+  max-width: 30%;
+  overflow: hidden;
+  color: var(--text-accent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-standard);
+}
+
+.accessNote {
+  margin: 0;
+  color: var(--text-subtle);
+}
+
+.accessGrant {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.accessLog {
+  margin: 0;
+  padding: 0;
+  max-height: 8rem;
+  overflow: auto;
+  color: var(--text-subtle);
+  font-family: var(--font-system-mono);
+  font-size: var(--font-size-sm);
+  list-style: none;
+}
+
 @media (max-width: 26.25rem) {
   .toolbar {
     gap: var(--space-half);

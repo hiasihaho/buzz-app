@@ -14,13 +14,16 @@ import {
   CloudOffIcon,
   DotsThreeIcon,
   LockIcon,
+  RobotIcon,
   TerminalWindowIcon,
 } from "../../shared/design-system/icons/index";
+import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
 import { Button } from "../../shared/design-system/ui/Button";
 import { EmptyState } from "../../shared/design-system/ui/EmptyState";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Input } from "../../shared/design-system/ui/Input";
 import type { BrowserViewProps } from "./api";
+import type { AutomationPolicy } from "./automation-policy";
 import {
   addressInputUrl,
   BrowserAttachError,
@@ -104,10 +107,12 @@ export function BrowserHostView({
   label,
   platform,
   sessions,
+  policy,
   pollInterval = 300,
 }: BrowserViewProps & {
   platform: BrowserPlatform;
   sessions: BrowserSessions;
+  policy: AutomationPolicy;
   pollInterval?: number;
 }) {
   const storage = builderlab?.storage ?? requestedStorage;
@@ -136,6 +141,13 @@ export function BrowserHostView({
     text: string;
     failed: boolean;
   } | null>(null);
+  const [accessOpen, setAccessOpen] = useState(false);
+  // Repaint when the automation policy changes (grants, requests, audit).
+  const [, setPolicyVersion] = useState(0);
+  useEffect(
+    () => policy.subscribe(() => setPolicyVersion((version) => version + 1)),
+    [policy],
+  );
 
   useEffect(() => {
     if (!editing.current && status.url) setDraft(status.url);
@@ -474,8 +486,32 @@ export function BrowserHostView({
     focusError.current = false;
     errorBar.current?.focus();
   }, [error, page]);
+
+  // Automation policy state for this guest: its origin is the grant boundary.
+  let origin = "";
+  try {
+    const parsed = new URL(status.url).origin;
+    if (parsed !== "null") origin = parsed;
+  } catch {
+    // No URL yet — no grants, no requests.
+  }
+  const grants = origin ? policy.grantsForOrigin(origin) : [];
+  const pendingRequest = session.current
+    ? policy.pendingFor(session.current)
+    : undefined;
+  const activity = origin
+    ? policy
+        .auditEntries()
+        .filter((entry) => entry.origin === origin)
+        .slice(-8)
+        .reverse()
+    : [];
   return (
-    <section className={styles.browser} aria-label="Browser">
+    <section
+      className={styles.browser}
+      aria-label="Browser"
+      data-agent-access={grants.length > 0 || undefined}
+    >
       <div
         className={styles.toolbar}
         role="toolbar"
@@ -516,6 +552,24 @@ export function BrowserHostView({
           onClick={() => setConsoleOpen((open) => !open)}
           icon={<TerminalWindowIcon size={16} />}
         />
+        <IconButton
+          size="toolbar"
+          variant="quiet"
+          aria-label="Agent access"
+          aria-expanded={accessOpen}
+          onClick={() => setAccessOpen((open) => !open)}
+          icon={<RobotIcon size={16} />}
+        />
+        {grants.length ? (
+          <span className={styles.accessBadge}>
+            {grants
+              .map(
+                (grant) =>
+                  `${grant.pluginId}: ${grant.level === "act" ? "read + act" : "read"}`,
+              )
+              .join(", ")}
+          </span>
+        ) : null}
         <form onSubmit={navigate}>
           <Input
             aria-label="Address"
@@ -570,6 +624,44 @@ export function BrowserHostView({
             </pre>
           ) : null}
         </form>
+      ) : null}
+      {accessOpen ? (
+        <div className={styles.access} aria-label="Agent access">
+          {grants.length === 0 && activity.length === 0 ? (
+            <span className={styles.accessNote}>
+              No agent holds access to this page.
+            </span>
+          ) : null}
+          {grants.map((grant) => (
+            <div key={grant.pluginId} className={styles.accessGrant}>
+              <span>
+                {grant.pluginId} —{" "}
+                {grant.level === "act" ? "read + act" : "read"}
+              </span>
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
+                onClick={() => {
+                  if (session.current)
+                    policy.revoke(grant.pluginId, origin, session.current);
+                }}
+              >
+                Revoke
+              </Button>
+            </div>
+          ))}
+          {activity.length ? (
+            <ul className={styles.accessLog}>
+              {activity.map((entry, index) => (
+                <li key={`${entry.at}-${index}`}>
+                  {new Date(entry.at).toLocaleTimeString()} — {entry.pluginId}{" "}
+                  {entry.verb} {entry.status.replace(/-/g, " ")}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
       {error && !page ? (
         <div ref={errorBar} className={styles.error} role="alert" tabIndex={-1}>
@@ -636,6 +728,52 @@ export function BrowserHostView({
           </div>
         ) : null}
       </div>
+      {grants.length ? <div className={styles.agentStrip} /> : null}
+      {pendingRequest ? (
+        <AlertDialog
+          title="Agent browser access"
+          description={
+            pendingRequest.verb === "act"
+              ? `${pendingRequest.pluginId} asks to read and act in this panel (${pendingRequest.origin}). Access lasts until you revoke it or restart Buzz.`
+              : `${pendingRequest.pluginId} asks to read this panel (${pendingRequest.origin}). Access lasts until you revoke it or restart Buzz.`
+          }
+          onClose={() => policy.resolveGrant(pendingRequest.id, null)}
+          actions={
+            <>
+              <Button
+                type="button"
+                variant="subtle"
+                onClick={() => policy.resolveGrant(pendingRequest.id, null)}
+              >
+                Deny
+              </Button>
+              {pendingRequest.verb === "act" ? (
+                <Button
+                  type="button"
+                  variant="subtle"
+                  onClick={() => policy.resolveGrant(pendingRequest.id, "read")}
+                >
+                  Read only
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() =>
+                  policy.resolveGrant(
+                    pendingRequest.id,
+                    pendingRequest.verb === "act" ? "act" : "read",
+                  )
+                }
+              >
+                {pendingRequest.verb === "act"
+                  ? "Allow reading + acting"
+                  : "Allow reading"}
+              </Button>
+            </>
+          }
+        />
+      ) : null}
     </section>
   );
 }

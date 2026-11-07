@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import type { AutomationVerb } from "./automation-policy";
 
 /** One signed-in Builderlab lifetime; never passed to website JavaScript.
  * `federated` is the public NIP-FI session revision; native holds its token. */
@@ -32,16 +33,29 @@ export type BrowserGuest = Readonly<{
   loading: boolean;
 }>;
 
+/** How a plugin classifies an evaluation for the automation policy gate
+ * (block/buzz-app#2984). Reading covers listing and snapshots; acting covers
+ * clicks, input and free-form script. Undeclared calls count as acting. */
+export type EvaluateOptions = Readonly<{ kind?: AutomationVerb }>;
+
 export interface Browser {
   readonly available: boolean;
   readonly View: ComponentType<BrowserViewProps>;
   /** The live guests, most recently shown first; one that closes
-   * mid-listing is left out. */
+   * mid-listing is left out. A plugin sees a guest's full details only with
+   * a grant on its origin; without one it gets the id, the origin and the
+   * loading state, so it can ask for access but not read content. */
   guests(): Promise<readonly BrowserGuest[]>;
   /** Runs `script` in a guest's page scope and resolves with its
    * JSON-serializable return value; page exceptions reject. Only the host
-   * and plugins can evaluate — website JavaScript never reaches this. */
-  evaluate(sessionId: string, script: string): Promise<unknown>;
+   * and plugins can evaluate — website JavaScript never reaches this.
+   * Plugin calls pass the automation policy gate (master switch, per-origin
+   * grant, rate limit) and are audited by plugin, origin and script hash. */
+  evaluate(
+    sessionId: string,
+    script: string,
+    options?: EvaluateOptions,
+  ): Promise<unknown>;
 }
 
 declare module "@deepseek-ai/cordis" {

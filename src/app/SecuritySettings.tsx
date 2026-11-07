@@ -2,9 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Header, InlineHeader } from "../shared/design-system/ui/Header";
 import { SettingsGroup } from "../shared/design-system/ui/SettingsGroup";
 import { PreferenceRow } from "../shared/design-system/ui/PreferenceRow";
+import { SwitchPreferenceRow } from "../shared/design-system/ui/SwitchPreferenceRow";
 import { Button } from "../shared/design-system/ui/Button";
 import { EmptyState } from "../shared/design-system/ui/EmptyState";
 import { LockIcon } from "../shared/design-system/icons";
+import {
+  setBrowserAutomationAllowed,
+  useBrowserAutomationAllowed,
+} from "../features/browser/automation-policy";
 import {
   listPairedTools,
   onPairingEvents,
@@ -24,6 +29,7 @@ export function SecuritySettings() {
   const [tools, setTools] = useState<PairedTool[] | null>(null);
   const [error, setError] = useState("");
   const [revoking, setRevoking] = useState<string | null>(null);
+  const agentBrowserAccess = useBrowserAutomationAllowed();
   const refresh = useCallback(async () => {
     try {
       setTools(await listPairedTools());
@@ -56,6 +62,18 @@ export function SecuritySettings() {
         title="Security"
         subtitle="Tools you allowed to use Buzz as you on this device."
       />
+      <InlineHeader
+        id="agent-browser-access-title"
+        title="Agent browser access"
+      />
+      <SettingsGroup>
+        <SwitchPreferenceRow
+          label="Let agents use website panels"
+          description="Off by default. While on, a plugin can ask to read or act in an embedded website panel; you approve each site per plugin from the panel, and the panel logs every action. Turning this off blocks new requests at once."
+          checked={agentBrowserAccess}
+          onCheckedChange={(enabled) => setBrowserAutomationAllowed(enabled)}
+        />
+      </SettingsGroup>
       <InlineHeader id="paired-tools-title" title="Paired command-line tools" />
       {error && (
         <p role="alert" className="text-body-sm text-danger">

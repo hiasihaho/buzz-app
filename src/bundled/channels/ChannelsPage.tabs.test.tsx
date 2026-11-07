@@ -45,6 +45,7 @@ import { ChannelsPage } from "./ChannelsPage";
 import type { CommunityMembership } from "../moderation/membership";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { BrowserHostView } from "../../features/browser/BrowserHostView";
+import { AutomationPolicy } from "../../features/browser/automation-policy";
 import { BrowserSessions } from "../../features/browser/sessions";
 import type { BrowserPlatform } from "../../features/browser/platform";
 
@@ -589,6 +590,7 @@ it("moving the last side app adopts its guest before the dock exit finishes", as
       storage="builderlab-apps"
       platform={platform}
       sessions={sessions}
+      policy={new AutomationPolicy()}
     />
   );
   try {

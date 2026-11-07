@@ -65,3 +65,18 @@ it("shows an empty state, and a read failure", async () => {
     "could not be read",
   );
 });
+
+it("keeps agent browser access off until the user switches it on", async () => {
+  vi.mocked(invoke).mockResolvedValue([]);
+  render(<SecuritySettings />);
+  const toggle = await screen.findByRole("switch", {
+    name: "Let agents use website panels",
+  });
+  expect(toggle).not.toBeChecked();
+  await userEvent.click(toggle);
+  expect(toggle).toBeChecked();
+  expect(localStorage.getItem("buzz-browser-automation.v1")).toBe("on");
+  await userEvent.click(toggle);
+  expect(toggle).not.toBeChecked();
+  expect(localStorage.getItem("buzz-browser-automation.v1")).toBe("off");
+});

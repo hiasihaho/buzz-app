@@ -15,8 +15,11 @@ import { PanelWorkspace } from "../panels/PanelWorkspace";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { GaugeIcon } from "../../shared/design-system/icons";
 import { BrowserHostView } from "./BrowserHostView";
+import { AutomationPolicy, setBrowserAutomationAllowed } from "./automation-policy";
 import { BrowserAttachError, type BrowserPlatform } from "./platform";
 import { BrowserSessions } from "./sessions";
+
+let policy: AutomationPolicy;
 
 class TestResizeObserver {
   static callbacks: Array<() => void> = [];
@@ -56,6 +59,8 @@ function fakePlatform(): BrowserPlatform {
 }
 
 beforeEach(() => {
+  policy = new AutomationPolicy();
+  setBrowserAutomationAllowed(true);
   TestResizeObserver.callbacks = [];
   vi.stubGlobal("ResizeObserver", TestResizeObserver);
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
@@ -84,6 +89,7 @@ it("attaches hidden-first guest bounds and detaches on close", async () => {
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   await waitFor(() =>
@@ -116,6 +122,7 @@ it("detaches a late attach result and serializes its replacement", async () => {
       url="https://one.example"
       platform={platform}
       sessions={sessions}
+      policy={policy}
     />,
   );
   await waitFor(() => expect(platform.attach).toHaveBeenCalledTimes(1));
@@ -124,6 +131,7 @@ it("detaches a late attach result and serializes its replacement", async () => {
       url="https://two.example"
       platform={platform}
       sessions={sessions}
+      policy={policy}
     />,
   );
   expect(platform.attach).toHaveBeenCalledTimes(1);
@@ -150,6 +158,7 @@ it("forces a bounds update on window resize even when geometry is unchanged", as
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   await waitFor(() => expect(platform.setBounds).toHaveBeenCalledTimes(1));
@@ -164,6 +173,7 @@ it("hides with the last valid bounds when the viewport leaves the window", async
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   await waitFor(() => expect(platform.setBounds).toHaveBeenCalledTimes(1));
@@ -205,6 +215,7 @@ it("waits for positive viewport bounds before attaching", async () => {
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   expect(platform.attach).not.toHaveBeenCalled();
@@ -219,6 +230,7 @@ it("hides when an already-open modal is inserted and shows after removal", async
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   await waitFor(() => expect(platform.setBounds).toHaveBeenCalledTimes(1));
@@ -249,6 +261,7 @@ it("hides for host popups marked after the browser is attached", async () => {
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   await waitFor(() => expect(platform.setBounds).toHaveBeenCalledTimes(1));
@@ -282,6 +295,7 @@ it("hides while its tab is covered and shows when it is selected again", async (
         url="https://example.com"
         platform={platform}
         sessions={new BrowserSessions(platform)}
+      policy={policy}
       />
     </div>,
   );
@@ -316,6 +330,7 @@ it("does not attach until its sliding pane has landed", async () => {
         url="https://example.com"
         platform={platform}
         sessions={new BrowserSessions(platform)}
+      policy={policy}
       />
     </div>,
   );
@@ -339,6 +354,7 @@ it("keeps each view's guest while another view is shown", async () => {
           url="https://first.example/"
           platform={platform}
           sessions={sessions}
+      policy={policy}
         />
       </div>
       <div data-testid="second" data-covered="">
@@ -346,6 +362,7 @@ it("keeps each view's guest while another view is shown", async () => {
           url="https://second.example/"
           platform={platform}
           sessions={sessions}
+      policy={policy}
         />
       </div>
     </>,
@@ -396,6 +413,7 @@ it("retries a failed evicted guest at its last page only on explicit Reload", as
             url={url}
             platform={platform}
             sessions={sessions}
+      policy={policy}
             pollInterval={5}
           />
         </div>
@@ -474,6 +492,7 @@ it("parks a kept-storage guest on unmount and adopts it when remounted", async (
         storage="builderlab-apps"
         platform={platform}
         sessions={sessions}
+      policy={policy}
       />,
     );
   const first = mount();
@@ -505,6 +524,7 @@ it("stays shown for a popup that does not reach over it", async () => {
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   await waitFor(() => expect(platform.setBounds).toHaveBeenCalledTimes(1));
@@ -548,6 +568,7 @@ it("keeps the website visible while a composer control's hover hint overlaps it"
         url="https://example.com"
         platform={platform}
         sessions={new BrowserSessions(platform)}
+      policy={policy}
       />
     </>,
   );
@@ -591,6 +612,7 @@ it("names its tab from the label until the page has a title", async () => {
               label="demo"
               platform={platform}
               sessions={new BrowserSessions(platform)}
+      policy={policy}
               pollInterval={5}
             />
           ),
@@ -633,6 +655,7 @@ it("keeps the page's last title while it reports none or opens again", async () 
               label="demo"
               platform={platform}
               sessions={sessions}
+      policy={policy}
               pollInterval={5}
             />
           ),
@@ -668,6 +691,7 @@ it("serializes presentation writes and applies the newest visibility", async () 
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   await waitFor(() => expect(platform.setBounds).toHaveBeenCalledTimes(1));
@@ -696,6 +720,7 @@ it("renders attach failures in toolbar space outside native guest bounds", async
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   const alert = await screen.findByRole("alert");
@@ -719,6 +744,7 @@ it("shows a refused app as a page in the website's place, with no reason", async
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -759,6 +785,7 @@ it("offers Try again and the system browser when Builderlab can't be reached", a
       url="https://example.com/app"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -818,6 +845,7 @@ it("keeps Try again focused while a refused app retries", async () => {
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -876,6 +904,7 @@ it("keeps Try again focused while an unreachable Builderlab retries", async () =
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -927,6 +956,7 @@ it("moves focus to the error when a retry from the page fails another way", asyn
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -968,6 +998,7 @@ it("keeps other attach failures in the error bar", async () => {
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   const alert = await screen.findByRole("alert");
@@ -986,6 +1017,7 @@ it("routes address and navigation controls to the active session", async () => {
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -1017,6 +1049,7 @@ it("runs scripts against the active session from the automation console", async 
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -1047,6 +1080,7 @@ it("shows page errors from the automation console", async () => {
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -1075,6 +1109,7 @@ it("keeps Reload keyboard-accessible while the website is loading", async () => 
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -1097,6 +1132,7 @@ it("navigates address input without a scheme over https, falling back to http", 
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -1131,6 +1167,7 @@ it("shows a synchronous address validation error", async () => {
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
     />,
   );
   await waitFor(() => expect(platform.status).toHaveBeenCalled());
@@ -1164,6 +1201,7 @@ it("shows a step to take elsewhere as a status, not an error", async () => {
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={5}
     />,
   );
@@ -1198,6 +1236,7 @@ it("ignores status from a replaced session", async () => {
       url="https://old.example"
       platform={platform}
       sessions={sessions}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -1209,6 +1248,7 @@ it("ignores status from a replaced session", async () => {
       url="https://new.example"
       platform={platform}
       sessions={sessions}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -1256,6 +1296,7 @@ it.each([false, true])(
         canResumeUrl={withPolicy ? () => false : undefined}
         platform={platform}
         sessions={sessions}
+      policy={policy}
       />,
     );
     // Establish that polling applied the intermediate navigation before losing this guest.
@@ -1304,6 +1345,7 @@ it("restores the last approved app after eviction instead of a later consent tic
         canResumeUrl={canResumeUrl}
         platform={platform}
         sessions={sessions}
+      policy={policy}
       />
     </div>,
   );
@@ -1367,6 +1409,7 @@ it("takes mouse back/forward requests for its page from app navigation", async (
       url="https://example.com"
       platform={platform}
       sessions={new BrowserSessions(platform)}
+      policy={policy}
       pollInterval={50_000}
     />,
   );
@@ -1396,4 +1439,120 @@ it("takes mouse back/forward requests for its page from app navigation", async (
     window.removeEventListener("buzz:history-back", app);
     window.removeEventListener("buzz:history-forward", app);
   }
+});
+
+it("asks for agent access in a dialog and frames the panel after a grant", async () => {
+  const platform = fakePlatform();
+  const view = render(
+    <BrowserHostView
+      url="https://example.com"
+      platform={platform}
+      sessions={new BrowserSessions(platform)}
+      policy={policy}
+    />,
+  );
+  await waitFor(() =>
+    expect(
+      view.container.querySelector('[data-browser-session="session-1"]'),
+    ).not.toBeNull(),
+  );
+  const section = view.container.querySelector("section")!;
+  expect(section).not.toHaveAttribute("data-agent-access");
+
+  const attempt = policy.authorize(
+    "qbc.browser",
+    "session-1",
+    "https://example.com",
+    "read",
+  );
+  const dialog = await screen.findByRole("alertdialog");
+  expect(dialog).toHaveTextContent(
+    "qbc.browser asks to read this panel (https://example.com)",
+  );
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Allow reading" }),
+  );
+  await expect(attempt).resolves.toBeUndefined();
+  expect(policy.grantFor("qbc.browser", "https://example.com")).toBe("read");
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  expect(section).toHaveAttribute("data-agent-access");
+  expect(view.container).toHaveTextContent("qbc.browser: read");
+});
+
+it("denies agent access from the dialog and frames nothing", async () => {
+  const platform = fakePlatform();
+  render(
+    <BrowserHostView
+      url="https://example.com"
+      platform={platform}
+      sessions={new BrowserSessions(platform)}
+      policy={policy}
+    />,
+  );
+  await waitFor(() =>
+    expect(
+      document.querySelector('[data-browser-session="session-1"]'),
+    ).not.toBeNull(),
+  );
+  const attempt = policy.authorize(
+    "qbc.browser",
+    "session-1",
+    "https://example.com",
+    "act",
+  );
+  const assertion = expect(attempt).rejects.toThrow("did not grant");
+  const dialog = await screen.findByRole("alertdialog");
+  expect(dialog).toHaveTextContent("asks to read and act in this panel");
+  await userEvent.click(within(dialog).getByRole("button", { name: "Deny" }));
+  await assertion;
+  await waitFor(() =>
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
+  );
+  expect(
+    document.querySelector("section")!.hasAttribute("data-agent-access"),
+  ).toBe(false);
+});
+
+it("revokes a grant from the agent access panel", async () => {
+  const platform = fakePlatform();
+  const view = render(
+    <BrowserHostView
+      url="https://example.com"
+      platform={platform}
+      sessions={new BrowserSessions(platform)}
+      policy={policy}
+    />,
+  );
+  await waitFor(() =>
+    expect(
+      view.container.querySelector('[data-browser-session="session-1"]'),
+    ).not.toBeNull(),
+  );
+  const attempt = policy.authorize(
+    "qbc.browser",
+    "session-1",
+    "https://example.com",
+    "act",
+  );
+  const dialog = await screen.findByRole("alertdialog");
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Allow reading + acting" }),
+  );
+  await attempt;
+  expect(view.container).toHaveTextContent("qbc.browser: read + act");
+
+  await userEvent.click(
+    screen.getByRole("button", { name: "Agent access" }),
+  );
+  const panel = screen.getByLabelText("Agent access", { selector: "div" });
+  expect(panel).toHaveTextContent("qbc.browser — read + act");
+  await userEvent.click(
+    within(panel).getByRole("button", { name: "Revoke" }),
+  );
+  expect(policy.grantFor("qbc.browser", "https://example.com")).toBeUndefined();
+  expect(
+    view.container.querySelector("section")!.hasAttribute("data-agent-access"),
+  ).toBe(false);
+  // The revoke landed in the panel's audit view.
+  expect(panel).toHaveTextContent("revoke revoked");
 });
