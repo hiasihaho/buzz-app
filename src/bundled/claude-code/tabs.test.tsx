@@ -272,7 +272,11 @@ function applied({
               ? "Darwin arm64\n"
               : args === "--version"
                 ? `${version} (Claude Code)\n`
-                : "",
+                : args === "auth status --json"
+                  ? // This build asks Claude for its sign-in (`auth.tsx`);
+                    // the fake key store says whether there is one.
+                    `${JSON.stringify({ loggedIn: nativeKey.saved })}\n`
+                  : "",
       ),
     );
     return {

@@ -1,27 +1,28 @@
-// How Buzz's Claude authenticates: with an Anthropic API key, pasted in
-// setup and kept by native code in the OS credential store (`claude_key.rs`),
-// which gives it to every `claude` as `ANTHROPIC_API_KEY`, never as an
-// argument, and never back to the app.
+// How Buzz's Claude authenticates in this build: with the Claude account
+// sign-in that `claude auth login` keeps in `~/.claude`, shared with the
+// `claude` in the terminal, as Buzz did before #2553 moved OSS builds to an
+// Anthropic API key. Nothing is pasted or stored by Buzz: `claude` itself
+// holds the credentials.
 //
-// Builds can replace this one file with another way to sign in, so the rest
-// of the plugin reaches authentication only through its exports: keep their
-// names and shapes when changing it.
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+// This file is the plugin's one authentication seam (see the upstream
+// `auth.tsx`): the rest of the plugin reaches authentication only through its
+// exports, so their names and shapes are kept.
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Field } from "../../shared/design-system/ui/Field";
 import { Input } from "../../shared/design-system/ui/Input";
 import inlineStyles from "../../shared/InlineReference.module.css";
-import type { Spawn } from "./claude";
+import { ENV, type Spawn } from "./claude";
 import type { ClaudeSetup } from "./setup";
 
-const NO_KEY =
-  "Claude needs an Anthropic API key. Add one in Settings → Agent setup → Harness defaults → Claude → Edit configuration.";
-/** What setup says first: the key is one for all of Claude, not per agent. */
-const KEY_ONCE =
-  "Claude requires an API key to connect to your account. Create one at console.anthropic.com and paste it below. You only have to set this up once, and Buzz keeps it securely on this computer.";
-const REJECTED_KEY =
-  "Anthropic rejected the Claude API key. It may have been revoked or run out of credit. Paste a working key in Settings → Agent setup → Harness defaults → Claude → Edit configuration.";
+const NOT_SIGNED_IN =
+  "Claude is not signed in. Sign in under Settings → Agent setup → Harness defaults → Claude → Edit configuration.";
+const REJECTED_SIGN_IN =
+  "Claude rejected the sign-in. It may have expired or been revoked, or the account has no Claude subscription. Sign in again under Settings → Agent setup → Harness defaults → Claude → Edit configuration.";
+const BROWSER_HINT =
+  "Continue in your browser. If it shows a code to paste, enter it here.";
+const SIGN_IN_ONCE =
+  "Claude runs with your Claude account. Sign in once; Buzz then uses the same sign-in as the claude in your terminal.";
 
 /** Runs one process as a setup step, its output shown; throws unless it
  * succeeds. */
@@ -32,11 +33,13 @@ export type Step = (
 ) => Promise<void>;
 type Env = Readonly<Record<string, string | null>>;
 
-/** Runs a `claude.sh` step; its output, or throws what it printed. */
-async function output(spawn: Spawn, id: string) {
+/** Runs a `claude.sh` step to its end: its exit code and what it printed. */
+async function collect(spawn: Spawn, id: string, args: readonly string[]) {
   let stdout = "";
   let stderr = "";
   const process = await spawn(id, {
+    args,
+    env: ENV,
     onStdout: (text) => {
       stdout += text;
     },
@@ -46,54 +49,35 @@ async function output(spawn: Spawn, id: string) {
   });
   await process.end();
   const code = await process.exited;
-  if (code !== 0)
-    throw new Error(stderr.trim() || `${id} ended (${code ?? "stopped"}).`);
-  return stdout;
+  return { code, stdout, stderr };
 }
 
-/** The key's native store (`claude_key.rs`): the OS credential store,
- * which hands the key to the Claude processes that ask for it. Nothing
- * here reads it back; native code relies on that, as it gives the key to
- * `claude-sh`, which runs whatever script it is given. */
-const nativeStore = ():
-  | Readonly<{
-      /** Whether a key is saved. */
-      status(): Promise<boolean>;
-      /** Saves the key; it is never read back. */
-      save(key: string): Promise<void>;
-    }>
-  | undefined =>
-  isTauri()
-    ? {
-        status: async () => (await invoke("claude_api_key_status")) === true,
-        save: (value) => invoke("claude_api_key_set", { value }),
-      }
-    : undefined;
-
 /** Whether Claude leads the Harness list and is new agents' default
- * (`src/bundled/index.ts`). Not here: Claude asks for an API key before its
- * first agent, so Codex leads. A build whose Claude signs in without that
- * friction can put it first. */
+ * (`src/bundled/index.ts`). Kept as upstream orders it. */
 export const leadsHarnesses = false;
 
-/** Claude's credentials on this computer. */
+/** Claude's credentials on this computer: the account `claude auth login`
+ * signed in. */
 export class ClaudeAuth {
   /** Which way this build authenticates. */
-  readonly id = "buzz-claude-auth:api-key";
+  readonly id = "buzz-claude-auth:login";
   /** What the agent type's row asks for while Claude cannot run. */
-  readonly attentionLabel = "Add Claude API key";
+  readonly attentionLabel = "Log in to Claude Code";
   /** Ends "Claude 2.1.0 …" while Claude cannot run. */
-  readonly needs = "needs an Anthropic API key";
-  /** An interactive sign-in setup runs as its step, when there is one. */
-  readonly signIn: ((step: Step) => Promise<void>) | undefined = undefined;
-  private saved: Promise<boolean> | undefined;
+  readonly needs = "is not signed in";
   private readonly listeners = new Set<() => void>();
 
-  private readonly store;
+  constructor(private readonly spawn: Spawn | undefined) {}
 
-  constructor(private readonly spawn: Spawn | undefined) {
-    this.store = spawn ? nativeStore() : undefined;
-  }
+  /** The interactive sign-in, run as a setup step: `claude auth login`
+   * opens the browser and may ask for a code, which `ClaudeSetup.answer`
+   * passes on. Running sessions start again once it succeeds. */
+  readonly signIn: ((step: Step) => Promise<void>) | undefined = async (
+    step,
+  ) => {
+    await step("claude", ["auth", "login"], "Sign-in");
+    for (const listener of this.listeners) listener();
+  };
 
   /** Told when the credentials change, so running sessions start again. */
   subscribe = (listener: () => void) => {
@@ -103,101 +87,81 @@ export class ClaudeAuth {
     };
   };
 
-  /** Whether a key is saved, asked once until it is saved again or checked;
-   * no key is asked again each time. */
-  private has() {
-    const store = this.store;
-    if (!store) return Promise.resolve(false);
-    if (this.saved) return this.saved;
-    const asking = store.status();
-    this.saved = asking;
-    // Only a saved key is kept: another Buzz on this computer may save one.
-    const forget = () => {
-      if (this.saved === asking) this.saved = undefined;
-    };
-    asking.then((saved) => saved || forget(), forget);
-    return asking;
-  }
-
-  /** Whether Claude can run turns: an account to show, or undefined. */
+  /** Whether Claude can run turns: the signed-in account to show, or
+   * undefined. Asked of `claude` itself each time. */
   async check(): Promise<Readonly<{ account?: string }> | undefined> {
-    this.saved = undefined;
-    return (await this.has()) ? {} : undefined;
-  }
-
-  /** Saves `key` for every `claude` started from now on; what to say. A
-   * save can't be stopped once it reaches the store, so `signal` only
-   * stops one that hasn't. */
-  async save(key: string, signal?: AbortSignal) {
-    const store = this.store;
-    if (!store) throw new Error("Claude runs only in the desktop app");
-    signal?.throwIfAborted();
-    try {
-      await store.save(key);
-    } finally {
-      // A refused save leaves the key as it was; anything else may not.
-      this.saved = undefined;
-    }
-    for (const listener of this.listeners) listener();
-    return "Saved the Anthropic API key.";
-  }
-
-  /** `spawn`, starting each `claude` with the saved key, which native code
-   * sets itself. `required` refuses to start one without a key, so no turn
-   * falls back on an account sign-in that `~/.claude` may hold. */
-  authorize(spawn: Spawn, required = false): Spawn {
-    return async (id, options) => {
-      // Buzz's copy, and the protected release (`claude-protected-*`).
-      if (id !== "claude" && !id.startsWith("claude-protected-"))
-        return spawn(id, options);
-      if (required && !(await this.has())) throw new Error(NO_KEY);
-      return spawn(id, {
-        ...options,
-        secrets: [...(options?.secrets ?? []), "anthropic-api-key"],
-      });
-    };
-  }
-
-  /** Security reviews' own Claude folder (absolute), which contained agents
-   * cannot write, and what they authenticate with: the key, which
-   * `authorize` asks native code for. */
-  async review(): Promise<Readonly<{ home: string; env: Env }>> {
     const spawn = this.spawn;
-    if (!spawn) throw new Error("Claude reviews need the desktop app");
-    if (!(await this.has())) throw new Error(NO_KEY);
-    const home = (await output(spawn, "review")).trim();
-    if (!home.startsWith("/"))
-      throw new Error("Claude's review folder is unreadable");
-    return { home, env: {} };
+    if (!spawn) return undefined;
+    const { code, stdout } = await collect(spawn, "claude", [
+      "auth",
+      "status",
+      "--json",
+    ]);
+    if (code !== 0) return undefined;
+    const status = JSON.parse(stdout) as {
+      loggedIn?: boolean;
+      email?: string;
+      orgName?: string;
+    };
+    if (!status.loggedIn) return undefined;
+    const account = [status.email, status.orgName].filter(Boolean).join(" · ");
+    return account ? { account } : {};
+  }
+
+  /** Nothing to save: `claude auth login` keeps the sign-in itself. */
+  async save(_key: string, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
+    throw new Error(
+      "This build signs in with your Claude account; there is no key to save.",
+    );
+  }
+
+  /** `spawn` as it is: every `claude` reads the sign-in from `~/.claude`.
+   * A turn without one fails with Claude's own error, which `explainTurn`
+   * says how to fix. */
+  authorize(spawn: Spawn, _required = false): Spawn {
+    return spawn;
+  }
+
+  /** Security reviews run Claude apart from `~/.claude`, so they need
+   * credentials of their own, which this build has none of. */
+  async review(): Promise<Readonly<{ home: string; env: Env }>> {
+    throw new Error(
+      "Claude security reviews need an API key build; this build signs in with a Claude account.",
+    );
   }
 
   /** A failed review's error, as the person can act on it. */
   explain(error: string) {
-    return rejected(error) ? REJECTED_KEY : error;
+    return rejected(error) ? REJECTED_SIGN_IN : error;
   }
 
   /** A failed turn's error as its report in the conversation says it, in
-   * Markdown: a missing or rejected key links to `settings`, where it is
-   * added once for every Claude agent. */
+   * Markdown: a missing or rejected sign-in links to `settings`. */
   explainTurn(error: string, settings: string) {
-    if (error.includes(NO_KEY))
-      return `Claude is missing an API key. Head to [Settings](${settings}) to add one.`;
-    return rejected(error)
-      ? `Anthropic rejected Claude's API key. It may have been revoked or run out of credit. Head to [Settings](${settings}) to replace it.`
-      : error;
+    if (signedOut(error) || rejected(error))
+      return `Claude is not signed in. Head to [Settings](${settings}) and choose Sign in.`;
+    return error;
   }
 }
 
-/** Whether Claude's error says Anthropic refused the key; turns end with
- * "Invalid API key · Fix external API key". */
+/** Whether Claude's error says it has no sign-in at all. */
+const signedOut = (error: string) =>
+  /not logged in|not signed in|please run \/login|run claude auth login/i.test(
+    error,
+  ) || error.includes(NOT_SIGNED_IN);
+
+/** Whether Claude's error says Anthropic refused the sign-in. */
 const rejected = (error: string) =>
-  /authentication_error|invalid x-api-key|invalid api key/i.test(error);
+  /authentication_error|OAuth token .*(expired|revoked)|invalid authentication/i.test(
+    error,
+  );
 
-const message = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
-
-/** Setup's ask while Claude cannot run: the key, once for every agent.
- * `onSaved` follows a saved key, so a surface can close. */
+/** Setup's ask while Claude cannot run: the interactive sign-in, with the
+ * browser's code once it runs. In the compact variant, as a row or a model
+ * field, it offers the Sign in button itself; the full variant sits in a
+ * dialog that has its own. `onSaved` follows a finished sign-in, so a surface
+ * can close. */
 export function SignIn({
   setup,
   disabled = false,
@@ -209,41 +173,103 @@ export function SignIn({
   variant?: "full" | "compact";
   onSaved?: (() => void) | undefined;
 }) {
+  const state = useSyncExternalStore(setup.subscribe, setup.snapshot);
+  const running = state.running === "sign-in";
+  const [code, setCode] = useState("");
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !running && state.status?.state === "ready")
+      onSaved?.();
+    wasRunning.current = running;
+  }, [running, state.status, onSaved]);
+  const answer = () => {
+    if (!code.trim() || disabled) return;
+    void setup.answer(code.trim());
+    setCode("");
+  };
+  if (!running)
+    return (
+      <div className="grid gap-3">
+        <p className="m-0 text-body-sm text-secondary">{SIGN_IN_ONCE}</p>
+        {variant === "compact" && (
+          <div>
+            <Button
+              type="button"
+              size="sm"
+              variant="prominent"
+              disabled={disabled || !!state.running}
+              onClick={() => void setup.run("sign-in")}
+            >
+              Sign in
+            </Button>
+          </div>
+        )}
+      </div>
+    );
   return (
-    <div className="grid gap-3">
-      {/* One paragraph says it all; the field adds no description of its own. */}
-      <p className="m-0 text-body-sm text-secondary">{KEY_ONCE}</p>
-      <KeyForm
-        setup={setup}
-        disabled={disabled}
-        compact={variant === "compact"}
-        onSaved={onSaved}
-      />
+    // Not a form: it sits inside agent creation's and Settings' own.
+    <div className="grid gap-2">
+      <Field label="Sign-in code" description={BROWSER_HINT}>
+        <Input
+          autoComplete="off"
+          value={code}
+          aria-disabled={disabled ? true : undefined}
+          onValueChange={setCode}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            answer();
+          }}
+        />
+      </Field>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="button"
+          size={variant === "compact" ? "sm" : "md"}
+          disabled={disabled || !code.trim()}
+          focusableWhenDisabled
+          onClick={answer}
+        >
+          Continue
+        </Button>
+      </div>
     </div>
   );
 }
 
-/** Claude's settings once it can run: replacing the key. `onSaved` follows
- * a saved key, so a surface can close. */
+/** Claude's settings once it can run: the account, and signing in again. */
 export function SignedIn({
   setup,
-  onSaved,
 }: {
   setup: ClaudeSetup;
   onSaved?: (() => void) | undefined;
 }) {
+  const state = useSyncExternalStore(setup.subscribe, setup.snapshot);
+  const account =
+    state.status?.state === "ready" ? state.status.account : undefined;
   return (
     <div className="grid gap-2">
       <p className="m-0 text-body-sm text-subtle">
-        Claude runs with your Anthropic API key.
+        {account
+          ? `Claude runs as ${account}, signed in with claude auth login.`
+          : "Claude runs with your Claude account sign-in."}
       </p>
-      <KeyForm setup={setup} replace onSaved={onSaved} />
+      <div>
+        <Button
+          type="button"
+          size="sm"
+          disabled={!!state.running}
+          onClick={() => void setup.run("sign-in")}
+        >
+          Switch account
+        </Button>
+      </div>
     </div>
   );
 }
 
 /** Where an agent's own surface, such as its library card, says Claude
- * cannot run: setup is one step in Settings, not one per agent. */
+ * cannot run: signing in is one step in Settings, not one per agent. */
 export function Missing({
   openSettings,
 }: {
@@ -251,7 +277,7 @@ export function Missing({
 }) {
   return (
     <p className="m-0 text-body-sm text-secondary">
-      Claude is missing an API key.{" "}
+      Claude is not signed in.{" "}
       {openSettings ? (
         <>
           Head to{" "}
@@ -262,99 +288,11 @@ export function Missing({
           >
             Settings
           </button>{" "}
-          to add one.
+          to sign in.
         </>
       ) : (
-        "Add one in Settings → Agent setup."
+        "Sign in under Settings → Agent setup."
       )}
     </p>
-  );
-}
-
-function KeyForm({
-  setup,
-  disabled = false,
-  compact = false,
-  replace = false,
-  onSaved,
-}: {
-  setup: ClaudeSetup;
-  disabled?: boolean;
-  compact?: boolean;
-  replace?: boolean;
-  onSaved?: (() => void) | undefined;
-}) {
-  const [key, setKey] = useState("");
-  const [saving, setSaving] = useState<AbortController>();
-  // Kept until the form closes.
-  const [saved, setSaved] = useState<{ ok: boolean; text: string }>();
-  // Closing the form cancels a save.
-  useEffect(() => () => saving?.abort(), [saving]);
-  const save = async () => {
-    if (!key.trim() || saving || disabled) return;
-    const controller = new AbortController();
-    setSaving(controller);
-    setSaved(undefined);
-    try {
-      const text = await setup.auth.save(key.trim(), controller.signal);
-      setKey("");
-      setSaved({ ok: true, text });
-      await setup.check();
-      onSaved?.();
-    } catch (error) {
-      if (!controller.signal.aborted)
-        setSaved({ ok: false, text: message(error) });
-    } finally {
-      setSaving(undefined);
-    }
-  };
-  return (
-    // Not a form: it sits inside agent creation's and Settings' own.
-    <div className="grid gap-2" aria-busy={saving ? true : undefined}>
-      <Field
-        label={replace ? "Replace API key" : "Anthropic API key"}
-        {...(replace && {
-          description:
-            "Create a key at console.anthropic.com. Buzz keeps it securely on this computer and gives it only to Claude, so commands your Claude agents run can read it.",
-        })}
-      >
-        <Input
-          type="password"
-          autoComplete="off"
-          value={key}
-          readOnly={!!saving}
-          aria-disabled={saving || disabled ? true : undefined}
-          onValueChange={setKey}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-            event.preventDefault();
-            void save();
-          }}
-        />
-      </Field>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          type="button"
-          {...(!replace && { variant: "prominent" as const })}
-          size={compact ? "sm" : "md"}
-          disabled={disabled || !key.trim()}
-          focusableWhenDisabled
-          loading={!!saving}
-          onClick={() => void save()}
-        >
-          Save key
-        </Button>
-        {saved && (
-          <p
-            role={saved.ok ? "status" : "alert"}
-            className={
-              saved.ok ? "m-0 text-body-sm text-subtle" : "buzz-field-error m-0"
-            }
-          >
-            {saved.text}
-          </p>
-        )}
-      </div>
-    </div>
   );
 }
