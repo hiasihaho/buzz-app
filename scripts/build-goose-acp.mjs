@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -113,7 +114,13 @@ export async function stageGoose(root, pin, triple, download = fetch) {
       chmodSync(binary, 0o755);
       console.log(`goose-acp ready (${pin.version}, ${triple})`);
     } else {
-      renameSync(staged, binary);
+      // The staging directory lives under target/, which may be a symlink to
+      // another filesystem; rename cannot cross devices. Copy next to the
+      // destination and rename within its directory, as the other stagers do.
+      const incoming = `${binary}.new`;
+      copyFileSync(staged, incoming);
+      chmodSync(incoming, 0o755);
+      renameSync(incoming, binary);
       console.log(`goose-acp staged at ${binary}`);
     }
   } finally {
