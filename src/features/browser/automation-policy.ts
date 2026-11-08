@@ -26,6 +26,7 @@ export type AuditStatus =
   | "revoked";
 
 export type AuditEntry = Readonly<{
+  id: number;
   at: number;
   pluginId: string;
   sessionId: string;
@@ -74,20 +75,14 @@ export function setBrowserAutomationAllowed(enabled: boolean): void {
     window.dispatchEvent(new Event(changedEvent));
 }
 export function useBrowserAutomationAllowed(): boolean {
-  return useSyncExternalStore(
-    (listener) => {
-      window.addEventListener(changedEvent, listener);
-      return () => window.removeEventListener(changedEvent, listener);
-    },
-    browserAutomationAllowed,
-  );
+  return useSyncExternalStore((listener) => {
+    window.addEventListener(changedEvent, listener);
+    return () => window.removeEventListener(changedEvent, listener);
+  }, browserAutomationAllowed);
 }
 
 /** An act grant covers reading; a read grant does not cover acting. */
-function covers(
-  level: GrantLevel | undefined,
-  verb: AutomationVerb,
-): boolean {
+function covers(level: GrantLevel | undefined, verb: AutomationVerb): boolean {
   return level !== undefined && (level === "act" || verb === "read");
 }
 
@@ -110,6 +105,7 @@ export class AutomationPolicy {
   private entries: AuditEntry[] = [];
   private readonly listeners = new Set<() => void>();
   private nextRequestId = 1;
+  private nextAuditId = 1;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -121,8 +117,11 @@ export class AutomationPolicy {
     for (const listener of this.listeners) listener();
   }
 
-  private audit(entry: AuditEntry) {
-    this.entries = [...this.entries, entry].slice(-AUDIT_CAP);
+  private audit(entry: Omit<AuditEntry, "id">) {
+    this.entries = [
+      ...this.entries,
+      { id: this.nextAuditId++, ...entry },
+    ].slice(-AUDIT_CAP);
   }
 
   auditEntries(): readonly AuditEntry[] {

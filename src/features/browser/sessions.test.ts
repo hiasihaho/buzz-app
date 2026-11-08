@@ -432,8 +432,7 @@ it("leaves a guest that closes mid-listing out", async () => {
     .mockResolvedValueOnce("one")
     .mockResolvedValueOnce("two");
   vi.mocked(browserPlatform.status).mockImplementation(async (id) => {
-    if (id === "one")
-      throw new Error("Browser session is closed or replaced");
+    if (id === "one") throw new Error("Browser session is closed or replaced");
     return {
       url: "https://two.example/",
       title: "Two",

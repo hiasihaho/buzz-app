@@ -43,9 +43,7 @@ it("delegates guests and evaluate for host automation", async () => {
   vi.mocked(browserPlatform.evaluate).mockResolvedValue(2);
   new BrowserService(context, browserPlatform);
   await expect(context.browser.guests()).resolves.toEqual([]);
-  await expect(context.browser.evaluate("session-1", "1 + 1")).resolves.toBe(
-    2,
-  );
+  await expect(context.browser.evaluate("session-1", "1 + 1")).resolves.toBe(2);
   expect(browserPlatform.evaluate).toHaveBeenCalledWith("session-1", "1 + 1");
 });
 
@@ -66,9 +64,8 @@ async function withGuest(browserPlatform: BrowserPlatform, context: Context) {
     loading: false,
     error: null,
   });
-  const sessions = (
-    context.browser as unknown as { sessions: BrowserSessions }
-  ).sessions;
+  const sessions = (context.browser as unknown as { sessions: BrowserSessions })
+    .sessions;
   await sessions.attach(
     "https://de.wikipedia.org/wiki/Nostr",
     { x: 0, y: 0, width: 800, height: 600 },
@@ -129,7 +126,10 @@ it("runs a plugin evaluation only after the user grants its origin", async () =>
       verb: "read",
     });
   });
-  policy.resolveGrant(policy.pendingFor("session-1")!.id, "read");
+  const request = policy.pendingFor("session-1");
+  expect(request).toBeDefined();
+  if (!request) throw new Error("expected a pending grant request");
+  policy.resolveGrant(request.id, "read");
   await expect(attempt).resolves.toBe("Nostr – Wikipedia");
   expect(browserPlatform.evaluate).toHaveBeenCalledWith(
     "session-1",

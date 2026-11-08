@@ -13,7 +13,9 @@ const SESSION_ID = {
 
 async function target(ctx, sessionId) {
   if (!ctx.browser.available)
-    throw new Error("The embedded browser is not available in this Buzz build.");
+    throw new Error(
+      "The embedded browser is not available in this Buzz build.",
+    );
   if (sessionId) return sessionId;
   const guests = await ctx.browser.guests();
   if (!guests.length)
@@ -194,7 +196,11 @@ export function apply(ctx) {
     name: "qbc_guests",
     description:
       "List the website guests open in Buzz's embedded browser (id, url, title, loading), most recently shown first. Pass an id as sessionId to the other qbc_ tools.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
     async call() {
       if (!ctx.browser.available)
         throw new Error(
@@ -207,7 +213,7 @@ export function apply(ctx) {
   ctx.agents.addTool({
     name: "qbc_snapshot",
     description:
-      "Snapshot a website guest's interactive elements (links, buttons, inputs, roles, tabindex): stores refs e1…eN in the page, marks each element with a matching data-qbc-ref attribute (qbc_eval scripts can find them via [data-qbc-ref=\"e3\"]) and returns them with tag, role, text, center coordinates and viewport visibility. Refs stay valid until the page navigates; qbc_click and qbc_type act on them.",
+      'Snapshot a website guest\'s interactive elements (links, buttons, inputs, roles, tabindex): stores refs e1…eN in the page, marks each element with a matching data-qbc-ref attribute (qbc_eval scripts can find them via [data-qbc-ref="e3"]) and returns them with tag, role, text, center coordinates and viewport visibility. Refs stay valid until the page navigates; qbc_click and qbc_type act on them.',
     inputSchema: {
       type: "object",
       properties: {
@@ -220,7 +226,10 @@ export function apply(ctx) {
       additionalProperties: false,
     },
     async call(_client, _context, args) {
-      const max = Math.min(Math.max(Math.trunc(args.max ?? DEFAULT_MAX), 1), 1000);
+      const max = Math.min(
+        Math.max(Math.trunc(args.max ?? DEFAULT_MAX), 1),
+        1000,
+      );
       const result = await ctx.browser.evaluate(
         await target(ctx, args.sessionId),
         snapshotScript(max),
@@ -377,9 +386,13 @@ export function apply(ctx) {
       const deadline = Date.now() + timeoutMs;
       let probe = { found: false };
       while (Date.now() < deadline) {
-        probe = await ctx.browser.evaluate(sessionId, waitProbeScript(selector), {
-          kind: "read",
-        });
+        probe = await ctx.browser.evaluate(
+          sessionId,
+          waitProbeScript(selector),
+          {
+            kind: "read",
+          },
+        );
         if (probe.found) break;
         await new Promise((resolve) => setTimeout(resolve, 150));
       }
@@ -413,7 +426,8 @@ export function apply(ctx) {
       let ref = null;
       if (args.ref !== undefined) {
         const match = /^e([1-9]\d*)$/.exec(String(args.ref));
-        if (!match) throw new Error("ref must look like e3 — see qbc_snapshot.");
+        if (!match)
+          throw new Error("ref must look like e3 — see qbc_snapshot.");
         index = Number(match[1]) - 1;
         ref = `e${match[1]}`;
       }

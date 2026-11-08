@@ -15,7 +15,10 @@ import { PanelWorkspace } from "../panels/PanelWorkspace";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { GaugeIcon } from "../../shared/design-system/icons";
 import { BrowserHostView } from "./BrowserHostView";
-import { AutomationPolicy, setBrowserAutomationAllowed } from "./automation-policy";
+import {
+  AutomationPolicy,
+  setBrowserAutomationAllowed,
+} from "./automation-policy";
 import { BrowserAttachError, type BrowserPlatform } from "./platform";
 import { BrowserSessions } from "./sessions";
 
@@ -295,7 +298,7 @@ it("hides while its tab is covered and shows when it is selected again", async (
         url="https://example.com"
         platform={platform}
         sessions={new BrowserSessions(platform)}
-      policy={policy}
+        policy={policy}
       />
     </div>,
   );
@@ -330,7 +333,7 @@ it("does not attach until its sliding pane has landed", async () => {
         url="https://example.com"
         platform={platform}
         sessions={new BrowserSessions(platform)}
-      policy={policy}
+        policy={policy}
       />
     </div>,
   );
@@ -354,7 +357,7 @@ it("keeps each view's guest while another view is shown", async () => {
           url="https://first.example/"
           platform={platform}
           sessions={sessions}
-      policy={policy}
+          policy={policy}
         />
       </div>
       <div data-testid="second" data-covered="">
@@ -362,7 +365,7 @@ it("keeps each view's guest while another view is shown", async () => {
           url="https://second.example/"
           platform={platform}
           sessions={sessions}
-      policy={policy}
+          policy={policy}
         />
       </div>
     </>,
@@ -406,19 +409,17 @@ it("retries a failed evicted guest at its last page only on explicit Reload", as
   const sessions = new BrowserSessions(platform);
   const urls = [1, 2, 3, 4, 5].map((n) => `https://view${n}.example/`);
   const view = render(
-    <>
-      {urls.map((url, index) => (
-        <div key={url} data-testid={`pane-${index}`} data-covered="">
-          <BrowserHostView
-            url={url}
-            platform={platform}
-            sessions={sessions}
-      policy={policy}
-            pollInterval={5}
-          />
-        </div>
-      ))}
-    </>,
+    urls.map((url, index) => (
+      <div key={url} data-testid={`pane-${index}`} data-covered="">
+        <BrowserHostView
+          url={url}
+          platform={platform}
+          sessions={sessions}
+          policy={policy}
+          pollInterval={5}
+        />
+      </div>
+    )),
   );
   const show = async (index: number) => {
     for (const [other] of urls.entries())
@@ -492,7 +493,7 @@ it("parks a kept-storage guest on unmount and adopts it when remounted", async (
         storage="builderlab-apps"
         platform={platform}
         sessions={sessions}
-      policy={policy}
+        policy={policy}
       />,
     );
   const first = mount();
@@ -568,7 +569,7 @@ it("keeps the website visible while a composer control's hover hint overlaps it"
         url="https://example.com"
         platform={platform}
         sessions={new BrowserSessions(platform)}
-      policy={policy}
+        policy={policy}
       />
     </>,
   );
@@ -612,7 +613,7 @@ it("names its tab from the label until the page has a title", async () => {
               label="demo"
               platform={platform}
               sessions={new BrowserSessions(platform)}
-      policy={policy}
+              policy={policy}
               pollInterval={5}
             />
           ),
@@ -655,7 +656,7 @@ it("keeps the page's last title while it reports none or opens again", async () 
               label="demo"
               platform={platform}
               sessions={sessions}
-      policy={policy}
+              policy={policy}
               pollInterval={5}
             />
           ),
@@ -1296,7 +1297,7 @@ it.each([false, true])(
         canResumeUrl={withPolicy ? () => false : undefined}
         platform={platform}
         sessions={sessions}
-      policy={policy}
+        policy={policy}
       />,
     );
     // Establish that polling applied the intermediate navigation before losing this guest.
@@ -1345,7 +1346,7 @@ it("restores the last approved app after eviction instead of a later consent tic
         canResumeUrl={canResumeUrl}
         platform={platform}
         sessions={sessions}
-      policy={policy}
+        policy={policy}
       />
     </div>,
   );
@@ -1456,7 +1457,8 @@ it("asks for agent access in a dialog and frames the panel after a grant", async
       view.container.querySelector('[data-browser-session="session-1"]'),
     ).not.toBeNull(),
   );
-  const section = view.container.querySelector("section")!;
+  const section = view.container.querySelector("section");
+  expect(section).not.toBeNull();
   expect(section).not.toHaveAttribute("data-agent-access");
 
   const attempt = policy.authorize(
@@ -1508,9 +1510,9 @@ it("denies agent access from the dialog and frames nothing", async () => {
   await waitFor(() =>
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
   );
-  expect(
-    document.querySelector("section")!.hasAttribute("data-agent-access"),
-  ).toBe(false);
+  expect(document.querySelector("section")).not.toHaveAttribute(
+    "data-agent-access",
+  );
 });
 
 it("revokes a grant from the agent access panel", async () => {
@@ -1541,18 +1543,14 @@ it("revokes a grant from the agent access panel", async () => {
   await attempt;
   expect(view.container).toHaveTextContent("qbc.browser: read + act");
 
-  await userEvent.click(
-    screen.getByRole("button", { name: "Agent access" }),
-  );
-  const panel = screen.getByLabelText("Agent access", { selector: "div" });
+  await userEvent.click(screen.getByRole("button", { name: "Agent access" }));
+  const panel = screen.getByRole("region", { name: "Agent access" });
   expect(panel).toHaveTextContent("qbc.browser — read + act");
-  await userEvent.click(
-    within(panel).getByRole("button", { name: "Revoke" }),
-  );
+  await userEvent.click(within(panel).getByRole("button", { name: "Revoke" }));
   expect(policy.grantFor("qbc.browser", "https://example.com")).toBeUndefined();
-  expect(
-    view.container.querySelector("section")!.hasAttribute("data-agent-access"),
-  ).toBe(false);
+  expect(view.container.querySelector("section")).not.toHaveAttribute(
+    "data-agent-access",
+  );
   // The revoke landed in the panel's audit view.
   expect(panel).toHaveTextContent("revoke revoked");
 });

@@ -64,7 +64,6 @@
 .console input {
   flex: 1;
   min-width: 0;
-  font-family: var(--font-system-mono);
 }
 
 .consoleOutput,

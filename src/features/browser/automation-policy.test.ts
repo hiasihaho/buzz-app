@@ -15,11 +15,18 @@ describe("AutomationPolicy", () => {
     policy = new AutomationPolicy();
   });
 
+  function pendingRequest() {
+    const request = policy.pendingFor("s1");
+    expect(request).toBeDefined();
+    if (!request) throw new Error("expected a pending grant request");
+    return request;
+  }
+
   async function grant(pluginId: string, level: "read" | "act") {
     const attempt = policy.authorize(pluginId, "s1", ORIGIN, "read");
-    const request = policy.pendingFor("s1");
-    expect(request?.pluginId).toBe(pluginId);
-    policy.resolveGrant(request!.id, level);
+    const request = pendingRequest();
+    expect(request.pluginId).toBe(pluginId);
+    policy.resolveGrant(request.id, level);
     await attempt;
   }
 
@@ -35,20 +42,22 @@ describe("AutomationPolicy", () => {
 
   it("holds the first call for a grant request and honors the answer", async () => {
     const attempt = policy.authorize("qbc.browser", "s1", ORIGIN, "read");
-    const request = policy.pendingFor("s1");
-    expect(request?.origin).toBe(ORIGIN);
-    policy.resolveGrant(request!.id, "read");
+    const request = pendingRequest();
+    expect(request.origin).toBe(ORIGIN);
+    policy.resolveGrant(request.id, "read");
     await expect(attempt).resolves.toBeUndefined();
     expect(policy.grantFor("qbc.browser", ORIGIN)).toBe("read");
     expect(policy.pendingFor("s1")).toBeUndefined();
-    expect(
-      policy.auditEntries().map((entry) => entry.status),
-    ).toEqual(["grant-requested", "grant-granted", "allowed"]);
+    expect(policy.auditEntries().map((entry) => entry.status)).toEqual([
+      "grant-requested",
+      "grant-granted",
+      "allowed",
+    ]);
   });
 
   it("rejects the call when the user declines", async () => {
     const attempt = policy.authorize("qbc.browser", "s1", ORIGIN, "read");
-    policy.resolveGrant(policy.pendingFor("s1")!.id, null);
+    policy.resolveGrant(pendingRequest().id, null);
     await expect(attempt).rejects.toThrow("did not grant qbc.browser");
     expect(policy.grantFor("qbc.browser", ORIGIN)).toBeUndefined();
     expect(policy.auditEntries().at(-1)?.status).toBe("grant-denied");
@@ -60,9 +69,9 @@ describe("AutomationPolicy", () => {
       policy.authorize("qbc.browser", "s1", ORIGIN, "read"),
     ).resolves.toBeUndefined();
     const acting = policy.authorize("qbc.browser", "s1", ORIGIN, "act");
-    const upgrade = policy.pendingFor("s1");
-    expect(upgrade?.verb).toBe("act");
-    policy.resolveGrant(upgrade!.id, "act");
+    const upgrade = pendingRequest();
+    expect(upgrade.verb).toBe("act");
+    policy.resolveGrant(upgrade.id, "act");
     await acting;
     expect(policy.grantFor("qbc.browser", ORIGIN)).toBe("act");
   });
@@ -70,7 +79,7 @@ describe("AutomationPolicy", () => {
   it("rejects acting when the upgrade answer stays read", async () => {
     await grant("qbc.browser", "read");
     const acting = policy.authorize("qbc.browser", "s1", ORIGIN, "act");
-    policy.resolveGrant(policy.pendingFor("s1")!.id, "read");
+    policy.resolveGrant(pendingRequest().id, "read");
     await expect(acting).rejects.toThrow("does not cover acting");
   });
 
@@ -78,7 +87,9 @@ describe("AutomationPolicy", () => {
     await grant("qbc.browser", "act");
     expect(policy.grantFor("qbc.browser", ORIGIN)).toBe("act");
     expect(policy.grantFor("other.plugin", ORIGIN)).toBeUndefined();
-    expect(policy.grantFor("qbc.browser", "https://example.com")).toBeUndefined();
+    expect(
+      policy.grantFor("qbc.browser", "https://example.com"),
+    ).toBeUndefined();
     expect(policy.grantsForOrigin(ORIGIN)).toEqual([
       { pluginId: "qbc.browser", level: "act" },
     ]);
@@ -119,7 +130,7 @@ describe("AutomationPolicy", () => {
     expect(policy.auditEntries().at(-1)?.status).toBe("revoked");
     const attempt = policy.authorize("qbc.browser", "s1", ORIGIN, "read");
     expect(policy.pendingFor("s1")).toBeDefined();
-    policy.resolveGrant(policy.pendingFor("s1")!.id, "act");
+    policy.resolveGrant(pendingRequest().id, "act");
     await attempt;
   });
 
@@ -133,7 +144,13 @@ describe("AutomationPolicy", () => {
 
   it("hashes scripts into the audit instead of keeping them", async () => {
     await grant("qbc.browser", "act");
-    await policy.authorize("qbc.browser", "s1", ORIGIN, "act", "document.title");
+    await policy.authorize(
+      "qbc.browser",
+      "s1",
+      ORIGIN,
+      "act",
+      "document.title",
+    );
     const entry = policy.auditEntries().at(-1);
     expect(entry?.detail).toMatch(/^[0-9a-f]{8}$/);
     expect(entry?.detail).not.toContain("document.title");
@@ -144,7 +161,7 @@ describe("AutomationPolicy", () => {
     const unsubscribe = policy.subscribe(() => notifications++);
     const attempt = policy.authorize("qbc.browser", "s1", ORIGIN, "read");
     expect(notifications).toBeGreaterThan(0);
-    policy.resolveGrant(policy.pendingFor("s1")!.id, "read");
+    policy.resolveGrant(pendingRequest().id, "read");
     await attempt;
     const seen = notifications;
     unsubscribe();

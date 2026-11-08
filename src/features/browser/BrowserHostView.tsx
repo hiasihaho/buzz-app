@@ -626,7 +626,7 @@ export function BrowserHostView({
         </form>
       ) : null}
       {accessOpen ? (
-        <div className={styles.access} aria-label="Agent access">
+        <section className={styles.access} aria-label="Agent access">
           {grants.length === 0 && activity.length === 0 ? (
             <span className={styles.accessNote}>
               No agent holds access to this page.
@@ -653,15 +653,15 @@ export function BrowserHostView({
           ))}
           {activity.length ? (
             <ul className={styles.accessLog}>
-              {activity.map((entry, index) => (
-                <li key={`${entry.at}-${index}`}>
+              {activity.map((entry) => (
+                <li key={entry.id}>
                   {new Date(entry.at).toLocaleTimeString()} — {entry.pluginId}{" "}
                   {entry.verb} {entry.status.replace(/-/g, " ")}
                 </li>
               ))}
             </ul>
           ) : null}
-        </div>
+        </section>
       ) : null}
       {error && !page ? (
         <div ref={errorBar} className={styles.error} role="alert" tabIndex={-1}>
