@@ -9,7 +9,7 @@ import {
   runGit,
 } from "./git";
 
-function fakeSpawn(stdout: string, code = 0, stderr = "") {
+function fakeSpawn(stdout: string, code = 0, stderr = "", endError?: Error) {
   const kill = vi.fn(async () => {});
   const spawn = vi.fn(async (_id: string, options?: HostProcessOptions) => {
     let exit!: (code: number | null) => void;
@@ -23,6 +23,7 @@ function fakeSpawn(stdout: string, code = 0, stderr = "") {
         options?.onStdout?.(stdout);
         options?.onStderr?.(stderr);
         exit(code);
+        if (endError) throw endError;
       },
       kill,
       exited,
@@ -42,6 +43,11 @@ it("always runs git with -C and never uses cwd", async () => {
     onStderr: expect.any(Function),
   });
   expect(spawn.mock.calls[0]?.[1]).not.toHaveProperty("cwd");
+});
+
+it("uses the exit code when Git exits before stdin is closed", async () => {
+  const { spawn } = fakeSpawn("answer\n", 0, "", new Error("No such process"));
+  await expect(runGit(spawn, "/repo", ["status"])).resolves.toBe("answer\n");
 });
 
 it("reports spawn and git failures distinctly", async () => {
@@ -99,6 +105,13 @@ it("parses porcelain worktree records and optional states", () => {
     "locked active operation",
     "prunable gitdir file points to non-existent location",
     "",
+    "worktree /repo/locked",
+    "HEAD 1111111111111111",
+    "locked",
+    "",
+    "worktree /repo.git",
+    "bare",
+    "",
     "",
   ].join("\0");
   expect(parseWorktreeList(output)).toEqual([
@@ -108,14 +121,33 @@ it("parses porcelain worktree records and optional states", () => {
       branch: "refs/heads/main",
       detached: false,
       bare: false,
+      locked: false,
+      prunable: false,
     },
     {
       path: "/repo/feature path",
       head: "fedcba9876543210",
       detached: true,
       bare: false,
-      locked: "active operation",
-      prunable: "gitdir file points to non-existent location",
+      locked: true,
+      lockReason: "active operation",
+      prunable: true,
+      prunableReason: "gitdir file points to non-existent location",
+    },
+    {
+      path: "/repo/locked",
+      head: "1111111111111111",
+      detached: false,
+      bare: false,
+      locked: true,
+      prunable: false,
+    },
+    {
+      path: "/repo.git",
+      detached: false,
+      bare: true,
+      locked: false,
+      prunable: false,
     },
   ]);
   expect(() => parseWorktreeList("worktree /repo\0\0")).toThrow(
@@ -176,6 +208,20 @@ it("parses branch metadata and every porcelain v2 entry kind", () => {
         worktree: "?",
       },
     ],
+  });
+});
+
+it("ignores unknown headers and omits unavailable branch metadata", () => {
+  const output = [
+    "# branch.oid (initial)",
+    "# branch.head (detached)",
+    "# branch.upstream origin/main",
+    "# stash 1",
+    "",
+  ].join("\0");
+  expect(parseStatus(output)).toEqual({
+    upstream: "origin/main",
+    entries: [],
   });
 });
 

@@ -54,7 +54,7 @@ export async function runGit(
       stop();
       abort.throwIfAborted();
     }
-    await process.end();
+    await process.end().catch(() => undefined);
     const code = await process.exited;
     abort.throwIfAborted();
     if (code === 0) return stdout;
@@ -71,8 +71,10 @@ export type GitWorktree = Readonly<{
   branch?: string;
   detached: boolean;
   bare: boolean;
-  locked?: string;
-  prunable?: string;
+  locked: boolean;
+  lockReason?: string;
+  prunable: boolean;
+  prunableReason?: string;
 }>;
 
 /** Parses `git worktree list --porcelain -z`. */
@@ -93,16 +95,18 @@ export function parseWorktreeList(output: string): readonly GitWorktree[] {
     if (!path || (!head && !fields.has("bare")))
       throw new Error("Invalid git worktree output");
     const branch = fields.get("branch");
-    const locked = fields.get("locked");
-    const prunable = fields.get("prunable");
+    const lockReason = fields.get("locked");
+    const prunableReason = fields.get("prunable");
     records.push({
       path,
       ...(head !== undefined && { head }),
       ...(branch !== undefined && { branch }),
       detached: fields.has("detached"),
       bare: fields.has("bare"),
-      ...(locked !== undefined && { locked }),
-      ...(prunable !== undefined && { prunable }),
+      locked: fields.has("locked"),
+      ...(lockReason && { lockReason }),
+      prunable: fields.has("prunable"),
+      ...(prunableReason && { prunableReason }),
     });
   }
   return records;
@@ -120,8 +124,8 @@ export type GitStatus = Readonly<{
   oid?: string;
   head?: string;
   upstream?: string;
-  ahead: number;
-  behind: number;
+  ahead?: number;
+  behind?: number;
   entries: readonly GitStatusEntry[];
 }>;
 
@@ -133,19 +137,25 @@ export function parseStatus(output: string): GitStatus {
   let oid: string | undefined;
   let head: string | undefined;
   let upstream: string | undefined;
-  let ahead = 0;
-  let behind = 0;
+  let ahead: number | undefined;
+  let behind: number | undefined;
   for (let i = 0; i < fields.length; i += 1) {
     const line = fields[i];
     if (!line) continue;
-    if (line.startsWith("# branch.oid ")) oid = line.slice(13);
-    else if (line.startsWith("# branch.head ")) head = line.slice(14);
-    else if (line.startsWith("# branch.upstream ")) upstream = line.slice(18);
+    if (line.startsWith("# branch.oid ")) {
+      const value = line.slice(13);
+      oid = value === "(initial)" ? undefined : value;
+    } else if (line.startsWith("# branch.head ")) {
+      const value = line.slice(14);
+      head = value === "(detached)" ? undefined : value;
+    } else if (line.startsWith("# branch.upstream ")) upstream = line.slice(18);
     else if (line.startsWith("# branch.ab ")) {
       const match = /^# branch\.ab \+(\d+) -(\d+)$/.exec(line);
       if (!match) throw new Error("Invalid git status branch counts");
       ahead = Number(match[1]);
       behind = Number(match[2]);
+    } else if (line.startsWith("# ")) {
+      // Porcelain v2 requires clients to ignore unknown headers.
     } else if (line.startsWith("1 ")) {
       entries.push(statusEntry("ordinary", line, 8));
     } else if (line.startsWith("2 ")) {
@@ -168,8 +178,8 @@ export function parseStatus(output: string): GitStatus {
     ...(oid && { oid }),
     ...(head && { head }),
     ...(upstream && { upstream }),
-    ahead,
-    behind,
+    ...(ahead !== undefined && { ahead }),
+    ...(behind !== undefined && { behind }),
     entries,
   };
 }
