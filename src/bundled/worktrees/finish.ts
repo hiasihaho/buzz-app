@@ -187,15 +187,10 @@ export async function recoverWorkspaceRemoval(
 ): Promise<WorkspaceBinding> {
   const binding = ownedBinding(bindings, bindingId, installId);
   if (binding.state !== "removing") return binding;
-  try {
-    const state = await recoverRemovalState(spawn, binding);
-    const recovered = { ...binding, state } as const;
-    bindings.set(recovered);
-    return recovered;
-  } catch (error) {
-    bindings.set({ ...binding, state: "failed" });
-    throw error;
-  }
+  const state = await recoverRemovalState(spawn, binding);
+  const recovered = { ...binding, state } as const;
+  bindings.set(recovered);
+  return recovered;
 }
 
 /** Removes only the exact previewed HEAD after a fresh fail-closed preview. */
@@ -235,6 +230,8 @@ export async function removeWorkspace(
       ["worktree", "remove", "--", binding.path],
       options.signal,
     );
+    await assertRepositoryIdentity(spawn, binding);
+    await assertBranchHead(spawn, binding, expectedHead);
     const remaining = parseWorktreeList(
       await runGit(
         spawn,
@@ -282,7 +279,10 @@ async function recoverRemovalState(
     ]),
   );
   let worktree = worktrees.find(({ path }) => samePath(path, binding.path));
-  if (!worktree) return "removed";
+  if (!worktree) {
+    await assertBranchHead(spawn, binding, expectedHead);
+    return "removed";
+  }
   if (
     worktree.detached ||
     !worktree.head ||
@@ -291,16 +291,7 @@ async function recoverRemovalState(
     (expectedHead && worktree.head.toLowerCase() !== expectedHead.toLowerCase())
   )
     throw new Error("Worktree state is unknown after failed removal");
-  const branchHead = trimSha(
-    await runGit(spawn, binding.repoRoot, [
-      "rev-parse",
-      "--verify",
-      "--end-of-options",
-      `refs/heads/${binding.branch}^{commit}`,
-    ]),
-  );
-  if (branchHead !== worktree.head.toLowerCase())
-    throw new Error("Workspace branch changed during removal");
+  await assertBranchHead(spawn, binding, worktree.head);
   if (worktree.prunable) {
     await runGit(spawn, binding.repoRoot, [
       "worktree",
@@ -332,6 +323,23 @@ async function recoverRemovalState(
   if (!samePath(commonDir, binding.gitCommonDir))
     throw new Error("Worktree repository changed after failed removal");
   return "ready";
+}
+
+async function assertBranchHead(
+  spawn: Spawn,
+  binding: WorkspaceBinding,
+  expectedHead?: string,
+): Promise<void> {
+  const branchHead = trimSha(
+    await runGit(spawn, binding.repoRoot, [
+      "rev-parse",
+      "--verify",
+      "--end-of-options",
+      `refs/heads/${binding.branch}^{commit}`,
+    ]),
+  );
+  if (expectedHead && branchHead !== expectedHead.toLowerCase())
+    throw new Error("Workspace branch changed during removal");
 }
 
 async function assertRepositoryIdentity(

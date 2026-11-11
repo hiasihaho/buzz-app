@@ -84,9 +84,11 @@ describe("worktree chat service", () => {
     const spawn: NonNullable<Host["spawn"]> = vi.fn(
       async (_id, options = {}) => {
         const args = options.args ?? [];
-        const stdout = args.includes("rev-parse")
+        const stdout = args.includes("--git-common-dir")
           ? "/repo/.git\n"
-          : `worktree /repo\0HEAD ${"b".repeat(40)}\0branch refs/heads/main\0\0`;
+          : args.includes("rev-parse")
+            ? `${"a".repeat(40)}\n`
+            : `worktree /repo\0HEAD ${"b".repeat(40)}\0branch refs/heads/main\0\0`;
         options.onStdout?.(stdout);
         return {
           write: async () => {},

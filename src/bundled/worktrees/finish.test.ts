@@ -282,7 +282,14 @@ describe("safe worktree finish", () => {
   it("removes without force, verifies absence, and preserves the binding identity", async () => {
     const saved = store();
     const remaining = `worktree /repo\0HEAD ${"c".repeat(40)}\0branch refs/heads/main\0\0`;
-    const spawn = git([...safePreviewOutputs(), `${sha}\n`, "", remaining]);
+    const spawn = git([
+      ...safePreviewOutputs(),
+      `${sha}\n`,
+      "",
+      "/repo/.git\n",
+      `${sha}\n`,
+      remaining,
+    ]);
     await expect(
       removeWorkspace(spawn, saved, binding.bindingId, sha, options),
     ).resolves.toEqual({ ...binding, state: "removed" });
@@ -290,7 +297,10 @@ describe("safe worktree finish", () => {
       "removing",
       "removed",
     ]);
-    expect(spawn.mock.calls.at(-2)?.[1]?.args).toEqual([
+    const remove = spawn.mock.calls.find(([, value]) =>
+      value?.args?.includes("remove"),
+    );
+    expect(remove?.[1]?.args).toEqual([
       "--no-optional-locks",
       "-C",
       binding.repoRoot,
@@ -299,7 +309,7 @@ describe("safe worktree finish", () => {
       "--",
       binding.path,
     ]);
-    expect(spawn.mock.calls.at(-2)?.[1]?.args).not.toContain("--force");
+    expect(remove?.[1]?.args).not.toContain("--force");
   });
 
   it("restores ready after a rejected remove leaves the same worktree intact", async () => {
@@ -365,6 +375,7 @@ describe("safe worktree finish", () => {
         git([
           "/repo/.git\n",
           `worktree /repo\0HEAD ${sha}\0branch refs/heads/main\0\0`,
+          `${sha}\n`,
         ]),
         absent,
         binding.bindingId,
@@ -412,7 +423,25 @@ describe("safe worktree finish", () => {
         binding.installId,
       ),
     ).rejects.toThrow("repository changed during removal");
-    expect(saved.current().state).toBe("failed");
+    expect(saved.current().state).toBe("removing");
+  });
+
+  it("leaves a failed startup recovery retryable when the branch cannot be verified", async () => {
+    const saved = store({ ...binding, state: "removing" });
+    await expect(
+      recoverWorkspaceRemoval(
+        git([
+          "/repo/.git\n",
+          `worktree /repo\0HEAD ${sha}\0branch refs/heads/main\0\0`,
+          { code: 128, stderr: "fatal: unknown revision\n" },
+        ]),
+        saved,
+        binding.bindingId,
+        binding.installId,
+      ),
+    ).rejects.toThrow("unknown revision");
+    expect(saved.current().state).toBe("removing");
+    expect(saved.set).not.toHaveBeenCalled();
   });
 
   it("keeps failed when the post-error worktree state cannot be reconciled", async () => {
