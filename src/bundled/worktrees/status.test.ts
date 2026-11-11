@@ -19,15 +19,20 @@ const binding: WorkspaceBinding = {
   state: "ready",
 };
 
-function git(outputs: readonly string[]) {
+type GitResult = string | Readonly<{ stderr: string; code: number }>;
+
+function git(outputs: readonly GitResult[]) {
   let call = 0;
   return vi.fn(async (_id: string, options?: HostProcessOptions) => {
-    const output = outputs[call++] ?? "";
+    const result = outputs[call++] ?? "";
     return {
       write: async () => {},
-      end: async () => options?.onStdout?.(output),
+      end: async () => {
+        if (typeof result === "string") options?.onStdout?.(result);
+        else options?.onStderr?.(result.stderr);
+      },
       kill: async () => {},
-      exited: Promise.resolve(0),
+      exited: Promise.resolve(typeof result === "string" ? 0 : result.code),
     };
   });
 }
@@ -127,6 +132,83 @@ it("reports repository and branch identity mismatches", async () => {
   ).resolves.toMatchObject({
     state: "mismatched",
     reason: "Worktree branch changed",
+  });
+});
+
+it("accepts decorated Git 2.36+ version strings", async () => {
+  const versions = [
+    "git version 2.43.0.windows.1\n",
+    "git version 2.50.1.428.gabc123\n",
+    "git version 2.47.0.rc1\n",
+    "git version 2.36.GIT\n",
+  ];
+  for (const version of versions) {
+    await expect(
+      reconcileWorkspaceStatus(
+        git([
+          version,
+          `worktree /repo\0HEAD ${"a".repeat(40)}\0branch refs/heads/main\0\0`,
+        ]),
+        binding,
+      ),
+    ).resolves.toMatchObject({ state: "missing" });
+  }
+});
+
+it("keeps status available when the saved base ref is missing", async () => {
+  const listed = `worktree ${binding.path}\0HEAD ${"b".repeat(40)}\0branch refs/heads/buzz/task\0\0`;
+  const spawn = git([
+    "git version 2.45.1\n",
+    listed,
+    "/repo/.git\n",
+    `# branch.oid ${"b".repeat(40)}\0# branch.head buzz/task\0`,
+    { code: 128, stderr: "fatal: ambiguous argument 'origin/main...HEAD'\n" },
+  ]);
+  await expect(reconcileWorkspaceStatus(spawn, binding)).resolves.toEqual({
+    state: "ready",
+    path: binding.path,
+    head: "b".repeat(40),
+    branch: "buzz/task",
+    detached: false,
+    dirty: false,
+    fileCount: 0,
+  });
+  expect(spawn.mock.calls.at(-1)?.[1]?.args).toEqual([
+    "--no-optional-locks",
+    "-C",
+    binding.path,
+    "rev-list",
+    "--left-right",
+    "--count",
+    "origin/main...HEAD",
+    "--",
+  ]);
+});
+
+it("reports inaccessible repositories and worktrees as missing", async () => {
+  await expect(
+    reconcileWorkspaceStatus(
+      git([{ code: 128, stderr: "fatal: cannot change to '/repo'\n" }]),
+      binding,
+    ),
+  ).resolves.toMatchObject({
+    state: "missing",
+    reason: "Repository is unavailable",
+  });
+
+  const listed = `worktree ${binding.path}\0HEAD ${"b".repeat(40)}\0branch refs/heads/buzz/task\0\0`;
+  await expect(
+    reconcileWorkspaceStatus(
+      git([
+        "git version 2.45.1\n",
+        listed,
+        { code: 128, stderr: "fatal: invalid gitfile format\n" },
+      ]),
+      binding,
+    ),
+  ).resolves.toMatchObject({
+    state: "missing",
+    reason: "Worktree is unavailable",
   });
 });
 

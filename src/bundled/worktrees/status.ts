@@ -2,6 +2,8 @@ import type { Host } from "../../features/host/service";
 import type { BindingStore, WorkspaceBinding } from "./binding";
 import {
   assertPathWithinRoot,
+  GitError,
+  type GitWorktree,
   parseStatus,
   parseWorktreeList,
   runGit,
@@ -41,28 +43,41 @@ export async function reconcileWorkspaceStatus(
   signal?: AbortSignal,
 ): Promise<WorkspaceStatus> {
   assertPathWithinRoot(binding.worktreeRoot, binding.path);
-  await requireGit236(spawn, binding.repoRoot, signal);
-
-  const worktrees = parseWorktreeList(
-    await runGit(
-      spawn,
-      binding.repoRoot,
-      ["worktree", "list", "--porcelain", "-z"],
-      signal,
-    ),
-  );
+  let worktrees: readonly GitWorktree[];
+  try {
+    await requireGit236(spawn, binding.repoRoot, signal);
+    worktrees = parseWorktreeList(
+      await runGit(
+        spawn,
+        binding.repoRoot,
+        ["worktree", "list", "--porcelain", "-z"],
+        signal,
+      ),
+    );
+  } catch (error) {
+    if (error instanceof GitError)
+      return emptyStatus(binding.path, "missing", "Repository is unavailable");
+    throw error;
+  }
   const worktree = worktrees.find(({ path }) => samePath(path, binding.path));
   if (!worktree || worktree.prunable)
     return emptyStatus(binding.path, "missing");
 
-  const commonDir = trimLine(
-    await runGit(
-      spawn,
-      binding.path,
-      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-      signal,
-    ),
-  );
+  let commonDir: string;
+  try {
+    commonDir = trimLine(
+      await runGit(
+        spawn,
+        binding.path,
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        signal,
+      ),
+    );
+  } catch (error) {
+    if (error instanceof GitError)
+      return emptyStatus(binding.path, "missing", "Worktree is unavailable");
+    throw error;
+  }
   if (!samePath(commonDir, binding.gitCommonDir))
     return emptyStatus(
       binding.path,
@@ -89,14 +104,25 @@ export async function reconcileWorkspaceStatus(
       "Worktree HEAD changed during status",
     );
 
-  const { ahead, behind } = parseAheadBehind(
-    await runGit(
-      spawn,
-      binding.path,
-      ["rev-list", "--left-right", "--count", `${binding.baseRef}...HEAD`],
-      signal,
-    ),
-  );
+  let divergence: { ahead: number; behind: number } | undefined;
+  try {
+    divergence = parseAheadBehind(
+      await runGit(
+        spawn,
+        binding.path,
+        [
+          "rev-list",
+          "--left-right",
+          "--count",
+          `${binding.baseRef}...HEAD`,
+          "--",
+        ],
+        signal,
+      ),
+    );
+  } catch (error) {
+    if (!(error instanceof GitError)) throw error;
+  }
   return {
     state: "ready",
     path: binding.path,
@@ -105,8 +131,7 @@ export async function reconcileWorkspaceStatus(
     detached: worktree.detached,
     dirty: parsed.entries.length > 0,
     fileCount: parsed.entries.length,
-    ahead,
-    behind,
+    ...divergence,
   };
 }
 
@@ -116,9 +141,7 @@ async function requireGit236(
   signal?: AbortSignal,
 ): Promise<void> {
   const output = await runGit(spawn, repoRoot, ["version"], signal);
-  const match = /^git version (\d+)\.(\d+)(?:\.\d+)?(?:\s|$)/.exec(
-    output.trim(),
-  );
+  const match = /^git version (\d+)\.(\d+)/.exec(output.trim());
   if (
     !match ||
     Number(match[1]) < 2 ||
