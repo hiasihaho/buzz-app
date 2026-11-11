@@ -1,3 +1,7 @@
+import { spawn as spawnProcess, spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Host, HostProcessOptions } from "../../features/host/service";
 import { describe, expect, it, vi } from "vitest";
 import { BindingStore, type WorkspaceBinding } from "./binding";
@@ -72,6 +76,7 @@ function fixture(
           code = 1;
         } else {
           added = true;
+          prunable = false;
           branchExists = true;
         }
       } else if (
@@ -113,6 +118,49 @@ const options = {
   newId: () => "binding-1",
   now: () => 10,
 };
+
+function realHost(): Required<Pick<Host, "spawn" | "resolveDirectory">> {
+  return {
+    spawn: async (id, processOptions = {}) => {
+      const child = spawnProcess(id, processOptions.args ?? [], {
+        env: {
+          ...process.env,
+          ...Object.fromEntries(
+            Object.entries(processOptions.env ?? {}).filter(
+              (entry): entry is [string, string] => entry[1] !== null,
+            ),
+          ),
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      child.stdout.on("data", (data) =>
+        processOptions.onStdout?.(data.toString()),
+      );
+      child.stderr.on("data", (data) =>
+        processOptions.onStderr?.(data.toString()),
+      );
+      return {
+        write: async (data: string) => {
+          child.stdin.write(data);
+        },
+        end: async (data?: string) => {
+          child.stdin.end(data);
+        },
+        kill: async () => {
+          child.kill();
+        },
+        exited: new Promise<number | null>((resolve, reject) => {
+          child.once("error", reject);
+          child.once("exit", resolve);
+        }),
+      };
+    },
+    resolveDirectory: async (path) => {
+      await mkdir(path, { recursive: true });
+      return realpath(path);
+    },
+  };
+}
 
 describe("prepareWorkspace", () => {
   it("canonicalizes roots, creates a worktree, and transitions preparing to ready", async () => {
@@ -200,31 +248,60 @@ describe("prepareWorkspace", () => {
     expect(store.forChannel(input.channelId)).toBeUndefined();
   });
 
-  it("recreates an owned prunable worktree registration", async () => {
-    const store = new BindingStore(memory());
-    const first = fixture();
-    await prepareWorkspace(first.host, store, input, options);
-    const recovered = fixture({
-      existing: true,
-      existingBranch: true,
-      prunable: true,
-    });
-    await expect(
-      prepareWorkspace(recovered.host, store, input, options),
-    ).resolves.toMatchObject({ state: "ready" });
-    expect(recovered.calls).toContainEqual([
-      "worktree",
-      "remove",
-      "--force",
-      "--force",
-      "/trees/task",
-    ]);
-    expect(recovered.calls).toContainEqual([
-      "worktree",
-      "add",
-      "/trees/task",
-      "buzz/task",
-    ]);
+  it("recreates an owned prunable registration in an existing empty leaf", async () => {
+    const root = await mkdtemp(join(tmpdir(), "buzz-worktree-prepare-"));
+    try {
+      const repoRoot = join(root, "repo");
+      const worktreeRoot = join(root, "trees");
+      const worktreePath = join(worktreeRoot, "task");
+      await mkdir(repoRoot);
+      spawnSync("git", ["init", "-q", "-b", "main", repoRoot], {
+        stdio: "inherit",
+      });
+      spawnSync(
+        "git",
+        [
+          "-C",
+          repoRoot,
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.org",
+          "commit",
+          "--allow-empty",
+          "-qm",
+          "base",
+        ],
+        { stdio: "inherit" },
+      );
+      const store = new BindingStore(memory());
+      const realInput = {
+        ...input,
+        repoRoot,
+        worktreeRoot,
+        baseRef: "main",
+      };
+      const host = realHost();
+      const first = await prepareWorkspace(host, store, realInput, options);
+      const branchSha = spawnSync(
+        "git",
+        ["-C", repoRoot, "rev-parse", "refs/heads/buzz/task"],
+        { encoding: "utf8" },
+      ).stdout.trim();
+      await rm(worktreePath, { recursive: true });
+
+      await expect(
+        prepareWorkspace(host, store, realInput, options),
+      ).resolves.toMatchObject({ state: "ready", path: worktreePath });
+      expect(first.baseSha).toBe(branchSha);
+      expect(
+        spawnSync("git", ["-C", worktreePath, "rev-parse", "HEAD"], {
+          encoding: "utf8",
+        }).stdout.trim(),
+      ).toBe(branchSha);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("does not mutate a locked owned worktree registration", async () => {

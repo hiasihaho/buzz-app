@@ -225,7 +225,7 @@ async function recoverPrunableWorktree(
   await runGit(
     host.spawn,
     binding.repoRoot,
-    ["worktree", "remove", "--force", "--force", binding.path],
+    ["worktree", "add", "-f", binding.path, binding.branch],
     signal,
   );
   return findWorktree(host, binding, signal);
