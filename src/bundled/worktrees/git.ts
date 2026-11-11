@@ -81,6 +81,28 @@ export async function runGit(
   }
 }
 
+export async function countUnpublishedCommits(
+  spawn: Spawn,
+  path: string,
+  signal?: AbortSignal,
+): Promise<number | undefined> {
+  try {
+    const output = await runGit(
+      spawn,
+      path,
+      ["rev-list", "--count", "HEAD", "--not", "--remotes", "--"],
+      signal,
+    );
+    const value = output.trim();
+    if (!/^\d+$/.test(value)) return undefined;
+    const count = Number(value);
+    return Number.isSafeInteger(count) ? count : undefined;
+  } catch {
+    signal?.throwIfAborted();
+    return undefined;
+  }
+}
+
 export type GitWorktree = Readonly<{
   path: string;
   head?: string;

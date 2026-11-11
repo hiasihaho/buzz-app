@@ -200,6 +200,49 @@ describe("safe worktree finish", () => {
     ]);
   });
 
+  it("keeps an unavailable unpublished count informational", async () => {
+    const result = await previewWorkspaceFinish(
+      git([
+        listed(),
+        "/repo/.git\n",
+        status(),
+        { code: 128, stderr: "fatal: count unavailable\n" },
+        `${sha}\n`,
+      ]),
+      store(),
+      binding.bindingId,
+      options,
+    );
+    expect(result).toEqual({
+      bindingId: binding.bindingId,
+      path: binding.path,
+      branch: binding.branch,
+      head: sha,
+      blockers: [],
+    });
+  });
+
+  it("reports a missing durable branch without exposing raw Git output", async () => {
+    const result = await previewWorkspaceFinish(
+      git([
+        listed(),
+        "/repo/.git\n",
+        status(),
+        "0\n",
+        { code: 128, stderr: "fatal: bad revision 'HEAD'\n" },
+      ]),
+      store(),
+      binding.bindingId,
+      options,
+    );
+    expect(result.blockers).toEqual([
+      expect.objectContaining({
+        kind: "repository",
+        message: "Workspace branch no longer exists",
+      }),
+    ]);
+  });
+
   it("blocks removal when the durable branch no longer preserves the previewed HEAD", async () => {
     const result = await previewWorkspaceFinish(
       git([listed(), "/repo/.git\n", status(), "4\n", `${"d".repeat(40)}\n`]),
@@ -472,7 +515,7 @@ describe("safe worktree finish", () => {
         binding.bindingId,
         binding.installId,
       ),
-    ).rejects.toThrow("unknown revision");
+    ).rejects.toThrow("Workspace branch no longer exists");
     expect(saved.current().state).toBe("removing");
     expect(saved.set).not.toHaveBeenCalled();
   });

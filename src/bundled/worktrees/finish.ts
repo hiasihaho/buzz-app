@@ -2,6 +2,8 @@ import type { Host } from "../../features/host/service";
 import type { BindingStore, WorkspaceBinding } from "./binding";
 import {
   assertPathWithinRoot,
+  countUnpublishedCommits,
+  GitError,
   type GitWorktree,
   parseStatus,
   parseWorktreeList,
@@ -138,28 +140,18 @@ export async function previewWorkspaceFinish(
     throw new Error("Git did not report a valid worktree HEAD");
   if (worktree.head && status.oid && worktree.head !== status.oid)
     throw new Error("Worktree HEAD changed during finish preview");
-  const unpublishedCommits = parseCount(
-    await runGit(
-      spawn,
-      binding.path,
-      ["rev-list", "--count", "HEAD", "--not", "--remotes", "--"],
-      options.signal,
-    ),
+  const unpublishedCommits = await countUnpublishedCommits(
+    spawn,
+    binding.path,
+    options.signal,
   );
-  const branchHead = trimSha(
-    await runGit(
-      spawn,
-      binding.repoRoot,
-      [
-        "rev-parse",
-        "--verify",
-        "--end-of-options",
-        `refs/heads/${binding.branch}^{commit}`,
-      ],
-      options.signal,
-    ),
-  );
-  if (branchHead !== head.toLowerCase())
+  const branchHead = await readBranchHead(spawn, binding, options.signal);
+  if (!branchHead)
+    blockers.push({
+      kind: "repository",
+      message: "Workspace branch no longer exists",
+    });
+  else if (branchHead !== head.toLowerCase())
     blockers.push({
       kind: "repository",
       message: "Workspace branch no longer points to the previewed HEAD",
@@ -185,7 +177,7 @@ export async function previewWorkspaceFinish(
   return {
     ...preview(binding, blockers),
     head: head.toLowerCase(),
-    unpublishedCommits,
+    ...(unpublishedCommits !== undefined && { unpublishedCommits }),
   };
 }
 
@@ -336,19 +328,39 @@ async function recoverRemovalState(
   return "ready";
 }
 
+async function readBranchHead(
+  spawn: Spawn,
+  binding: WorkspaceBinding,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  try {
+    return trimSha(
+      await runGit(
+        spawn,
+        binding.repoRoot,
+        [
+          "rev-parse",
+          "--verify",
+          "--end-of-options",
+          `refs/heads/${binding.branch}^{commit}`,
+        ],
+        signal,
+      ),
+    );
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof GitError) return undefined;
+    throw error;
+  }
+}
+
 async function assertBranchHead(
   spawn: Spawn,
   binding: WorkspaceBinding,
   expectedHead?: string,
 ): Promise<void> {
-  const branchHead = trimSha(
-    await runGit(spawn, binding.repoRoot, [
-      "rev-parse",
-      "--verify",
-      "--end-of-options",
-      `refs/heads/${binding.branch}^{commit}`,
-    ]),
-  );
+  const branchHead = await readBranchHead(spawn, binding);
+  if (!branchHead) throw new Error("Workspace branch no longer exists");
   if (expectedHead && branchHead !== expectedHead.toLowerCase())
     throw new Error("Workspace branch changed during removal");
 }
@@ -407,15 +419,6 @@ function preview(
     branch: binding.branch,
     blockers,
   };
-}
-
-function parseCount(output: string): number {
-  const value = trimLine(output, "Git count");
-  if (!/^\d+$/.test(value)) throw new Error("Git returned an invalid count");
-  const count = Number(value);
-  if (!Number.isSafeInteger(count))
-    throw new Error("Git returned an invalid count");
-  return count;
 }
 
 function trimSha(output: string): string {

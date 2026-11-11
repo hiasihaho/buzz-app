@@ -25,7 +25,12 @@ import styles from "./WorktreeStatusBar.module.css";
 type State =
   | Readonly<{ channelId: string; status: "loading" }>
   | Readonly<{ channelId: string; status: "ready"; summary: WorktreeSummary }>
-  | Readonly<{ channelId: string; status: "error"; message: string }>;
+  | Readonly<{
+      channelId: string;
+      status: "error";
+      message: string;
+      summary?: WorktreeSummary;
+    }>;
 
 function message(reason: unknown) {
   return reason instanceof Error
@@ -50,37 +55,53 @@ export function WorktreeStatusBar({
   channelId,
   worktrees,
   openDiff,
+  agentWorking,
 }: {
   channelId: string;
   worktrees: Worktrees;
   openDiff(): void;
+  agentWorking: boolean;
 }) {
   const available = worktrees.has(channelId);
   const [stored, setStored] = useState<State>({
     channelId,
     status: "loading",
   });
+  const [busy, setBusy] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const request = useRef<AbortController | undefined>(undefined);
   const refresh = useCallback(() => {
     request.current?.abort();
-    if (!available) return;
+    if (!available) {
+      setBusy(false);
+      return;
+    }
     const controller = new AbortController();
     request.current = controller;
+    setBusy(true);
     setCopyStatus("");
-    setStored({ channelId, status: "loading" });
+    setStored((current) => {
+      if (current.channelId !== channelId)
+        return { channelId, status: "loading" };
+      return current;
+    });
     worktrees.summary(channelId, controller.signal).then(
       (summary) => {
-        if (!controller.signal.aborted)
-          setStored({ channelId, status: "ready", summary });
+        if (controller.signal.aborted) return;
+        setStored({ channelId, status: "ready", summary });
+        if (request.current === controller) setBusy(false);
       },
       (reason: unknown) => {
-        if (!controller.signal.aborted)
-          setStored({
-            channelId,
-            status: "error",
-            message: message(reason),
-          });
+        if (controller.signal.aborted) return;
+        setStored((current) => ({
+          channelId,
+          status: "error",
+          message: message(reason),
+          ...(current.channelId === channelId && "summary" in current
+            ? { summary: current.summary }
+            : {}),
+        }));
+        if (request.current === controller) setBusy(false);
       },
     );
   }, [available, channelId, worktrees]);
@@ -88,11 +109,26 @@ export function WorktreeStatusBar({
     refresh();
     return () => request.current?.abort();
   }, [refresh]);
+  useEffect(() => {
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [refresh]);
+  const previousWork = useRef({ channelId, agentWorking });
+  useEffect(() => {
+    const previous = previousWork.current;
+    previousWork.current = { channelId, agentWorking };
+    if (
+      previous.channelId === channelId &&
+      previous.agentWorking &&
+      !agentWorking
+    )
+      refresh();
+  }, [agentWorking, channelId, refresh]);
 
   if (!available) return null;
   const state: State =
     stored.channelId === channelId ? stored : { channelId, status: "loading" };
-  const summary = state.status === "ready" ? state.summary : undefined;
+  const summary = "summary" in state ? state.summary : undefined;
   const fileCount = summary?.status.fileCount ?? 0;
   const ahead = summary?.status.ahead;
   const unpublished = summary?.unpublishedCommits;
@@ -106,11 +142,13 @@ export function WorktreeStatusBar({
           ? countLabel(fileCount, "changed file")
           : "Local worktree is clean";
   const StatusIcon =
-    state.status === "error"
-      ? WarningCircleIcon
-      : changed
-        ? CircleDashedIcon
-        : CheckCircleIcon;
+    state.status === "loading"
+      ? CircleDashedIcon
+      : state.status === "error"
+        ? WarningCircleIcon
+        : changed
+          ? CircleDashedIcon
+          : CheckCircleIcon;
 
   return (
     <section className={styles.root} aria-label="Local worktree status">
@@ -128,18 +166,39 @@ export function WorktreeStatusBar({
         )}
       </div>
       <div className={styles.actions}>
-        <span className={styles.state} role="status" title={statusLabel}>
-          <StatusIcon size={14} aria-hidden="true" />
-          <span>
-            {state.status === "loading"
-              ? "Checking…"
-              : changed
-                ? "Changed"
-                : state.status === "error"
-                  ? "Check needed"
-                  : "Clean"}
+        {state.status === "error" ? (
+          <span className={styles.state}>
+            <PopoverRoot>
+              <PopoverTrigger
+                render={
+                  <IconButton
+                    size="xs"
+                    variant="ghost"
+                    aria-label="Local worktree needs attention; show reason"
+                    title="Show worktree status problem"
+                    icon={<WarningCircleIcon size={14} aria-hidden="true" />}
+                  />
+                }
+              />
+              <PopoverPopup side="top" align="end" size="compact">
+                <PopoverTitle>Local worktree needs attention</PopoverTitle>
+                <PopoverDescription>{state.message}</PopoverDescription>
+              </PopoverPopup>
+            </PopoverRoot>
+            <span className={styles.statusText}>Check needed</span>
           </span>
-        </span>
+        ) : (
+          <span className={styles.state} role="status" title={statusLabel}>
+            <StatusIcon size={14} aria-hidden="true" />
+            <span className={styles.statusText}>
+              {state.status === "loading"
+                ? "Checking…"
+                : changed
+                  ? "Changed"
+                  : "Clean"}
+            </span>
+          </span>
+        )}
         <Button
           size="inline"
           variant="ghost"
@@ -170,7 +229,7 @@ export function WorktreeStatusBar({
                 title="Local commit details"
               >
                 <GitCommitIcon size={14} aria-hidden="true" />
-                <span>{ahead ?? unpublished ?? "—"}</span>
+                <span>{ahead ?? "—"}</span>
               </Button>
             }
           />
@@ -183,7 +242,7 @@ export function WorktreeStatusBar({
               {unpublished === undefined
                 ? "Remote-tracking evidence is unavailable."
                 : `${countLabel(unpublished, "commit")} not found on a local remote-tracking branch.`}
-              {" This is informational and does not block safe finish."}
+              {" This evidence is informational."}
             </PopoverDescription>
           </PopoverPopup>
         </PopoverRoot>
@@ -208,7 +267,7 @@ export function WorktreeStatusBar({
           onClick={refresh}
           aria-label="Refresh local worktree status"
           title="Refresh local worktree status"
-          loading={state.status === "loading"}
+          loading={busy}
           icon={<ArrowsClockwiseIcon size={13} />}
         />
       </div>

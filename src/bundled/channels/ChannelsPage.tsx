@@ -411,6 +411,15 @@ function ChannelWorkspace({
     [draft?.linked, scope, navigation?.signal],
   );
   const list = useChannelRoster(queries.channels);
+  const workingIds = useSyncExternalStore(
+    queries.agentActivity.subscribeWorking,
+    queries.agentActivity.workingSnapshot,
+    queries.agentActivity.workingSnapshot,
+  );
+  const workingChannels = useMemo(
+    () => new Set<string>(JSON.parse(workingIds)),
+    [workingIds],
+  );
   const initialList = useRef(list);
   useFirstChannel({ scope, cached, queries, list, membership });
   const preferences = useSidebarPreferences(queries.sidebarPreferences);
@@ -2422,6 +2431,7 @@ function ChannelWorkspace({
           <WorktreeStatusBar
             channelId={current.id}
             worktrees={worktrees}
+            agentWorking={workingChannels.has(current.id)}
             openDiff={() =>
               panels.requestOpen({
                 channelId: current.id,

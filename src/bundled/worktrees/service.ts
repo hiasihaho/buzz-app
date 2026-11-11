@@ -4,7 +4,7 @@ import { BindingStore, type WorkspaceBinding } from "./binding";
 import { prepareWorkspace, WorkspaceIntentConflict } from "./prepare";
 import { reconcileWorkspaceStatus, type WorkspaceStatus } from "./status";
 import { recoverWorkspaceRemoval } from "./finish";
-import { runGit } from "./git";
+import { countUnpublishedCommits, runGit } from "./git";
 
 const INSTALL_ID_KEY = "buzz.worktrees.install.v1";
 const MAX_DIFF_BYTES = 2_000_000;
@@ -106,7 +106,7 @@ export function createWorktrees(
       await recovery;
       const binding = readyBinding(bindings, channelId);
       const status = await readyStatus(desktop.spawn, binding, signal);
-      const unpublishedCommits = await countUnpublished(
+      const unpublishedCommits = await countUnpublishedCommits(
         desktop.spawn,
         binding.path,
         signal,
@@ -207,28 +207,6 @@ async function readyStatus(
           : "The local worktree no longer matches this chat"),
     );
   return status;
-}
-
-async function countUnpublished(
-  spawn: NonNullable<Host["spawn"]>,
-  path: string,
-  signal?: AbortSignal,
-): Promise<number | undefined> {
-  try {
-    const output = await runGit(
-      spawn,
-      path,
-      ["rev-list", "--count", "HEAD", "--not", "--remotes", "--"],
-      signal,
-    );
-    const value = output.trim();
-    if (!/^\d+$/.test(value)) return undefined;
-    const count = Number(value);
-    return Number.isSafeInteger(count) ? count : undefined;
-  } catch {
-    signal?.throwIfAborted();
-    return undefined;
-  }
 }
 
 function workspace(value: Workspace): WorktreeWorkspace | undefined {
