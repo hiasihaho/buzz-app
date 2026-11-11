@@ -26,11 +26,16 @@ function fixture(
     addFails?: boolean;
     existing?: boolean;
     existingBranch?: boolean;
+    branchSha?: string;
+    locked?: boolean;
+    prunable?: boolean;
+    resolvedWorktreePath?: string;
   } = {},
 ) {
   const calls: string[][] = [];
   let added = options.existing ?? false;
   let branchExists = options.existingBranch ?? added;
+  let prunable = options.prunable ?? false;
   const spawn: NonNullable<Host["spawn"]> = vi.fn(
     async (_id: string, processOptions: HostProcessOptions = {}) => {
       const args = [...(processOptions.args ?? [])];
@@ -39,16 +44,29 @@ function fixture(
       let stdout = "";
       let stderr = "";
       let code = 0;
-      if (gitArgs[0] === "rev-parse" && gitArgs.at(-1)?.endsWith("^{commit}"))
+      if (
+        gitArgs[0] === "rev-parse" &&
+        gitArgs.includes("refs/heads/buzz/task^{commit}")
+      )
+        stdout = `${options.branchSha ?? "a".repeat(40)}\n`;
+      else if (
+        gitArgs[0] === "rev-parse" &&
+        gitArgs.at(-1)?.endsWith("^{commit}")
+      )
         stdout = `${"a".repeat(40)}\n`;
       else if (gitArgs[0] === "rev-parse") stdout = "/repo/.git\n";
       else if (gitArgs[0] === "worktree" && gitArgs[1] === "list")
         stdout = `worktree /repo\0HEAD ${"a".repeat(40)}\0branch refs/heads/main\0\0${
           added
-            ? `worktree /trees/task\0HEAD ${"a".repeat(40)}\0branch refs/heads/buzz/task\0\0`
+            ? `worktree /trees/task\0HEAD ${"a".repeat(40)}\0branch refs/heads/buzz/task\0${
+                options.locked ? "locked interrupted add\0" : ""
+              }${prunable ? "prunable missing gitdir\0" : ""}\0`
             : ""
         }`;
-      else if (gitArgs[0] === "worktree" && gitArgs[1] === "add") {
+      else if (gitArgs[0] === "worktree" && gitArgs[1] === "remove") {
+        added = false;
+        prunable = false;
+      } else if (gitArgs[0] === "worktree" && gitArgs[1] === "add") {
         if (options.addFails) {
           stderr = "add failed";
           code = 1;
@@ -84,6 +102,8 @@ function fixture(
   const resolveDirectory = vi.fn(async (path: string) => {
     if (path === "/repo-link") return "/repo";
     if (path === "/trees-link") return "/trees";
+    if (path === "/trees/task" && options.resolvedWorktreePath)
+      return options.resolvedWorktreePath;
     return path;
   });
   return { host: { spawn, resolveDirectory }, calls };
@@ -156,6 +176,69 @@ describe("prepareWorkspace", () => {
       "/trees/task",
       "buzz/task",
     ]);
+  });
+
+  it("rejects a symlink leaf that resolves outside the worktree root", async () => {
+    const { host } = fixture({ resolvedWorktreePath: "/outside" });
+    const store = new BindingStore(memory());
+    await expect(prepareWorkspace(host, store, input, options)).rejects.toThrow(
+      "inside the configured root",
+    );
+    expect(host.spawn).not.toHaveBeenCalled();
+    expect(store.forChannel(input.channelId)).toBeUndefined();
+  });
+
+  it("rejects a mismatched existing branch without recording ownership", async () => {
+    const { host } = fixture({
+      existingBranch: true,
+      branchSha: "b".repeat(40),
+    });
+    const store = new BindingStore(memory());
+    await expect(prepareWorkspace(host, store, input, options)).rejects.toThrow(
+      "branch already exists at a different commit",
+    );
+    expect(store.forChannel(input.channelId)).toBeUndefined();
+  });
+
+  it("recreates an owned prunable worktree registration", async () => {
+    const store = new BindingStore(memory());
+    const first = fixture();
+    await prepareWorkspace(first.host, store, input, options);
+    const recovered = fixture({
+      existing: true,
+      existingBranch: true,
+      prunable: true,
+    });
+    await expect(
+      prepareWorkspace(recovered.host, store, input, options),
+    ).resolves.toMatchObject({ state: "ready" });
+    expect(recovered.calls).toContainEqual([
+      "worktree",
+      "remove",
+      "--force",
+      "--force",
+      "/trees/task",
+    ]);
+    expect(recovered.calls).toContainEqual([
+      "worktree",
+      "add",
+      "/trees/task",
+      "buzz/task",
+    ]);
+  });
+
+  it("does not mutate a locked owned worktree registration", async () => {
+    const store = new BindingStore(memory());
+    await prepareWorkspace(fixture().host, store, input, options);
+    const locked = fixture({ existing: true, locked: true, prunable: true });
+    await expect(
+      prepareWorkspace(locked.host, store, input, options),
+    ).rejects.toThrow("locked: interrupted add");
+    expect(
+      locked.calls.some(
+        (args) => args[0] === "worktree" && args[1] === "remove",
+      ),
+    ).toBe(false);
   });
 
   it("records failed and rethrows when creation fails", async () => {

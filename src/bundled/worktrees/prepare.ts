@@ -41,9 +41,11 @@ export async function prepareWorkspace(
 
   const repoRoot = await host.resolveDirectory(input.repoRoot);
   const worktreeRoot = await host.resolveDirectory(input.worktreeRoot);
-  // resolveDirectory creates a missing directory, so canonicalize only the
-  // parent and append one validated leaf before `git worktree add`.
-  const path = joinLeaf(worktreeRoot, input.worktreeName);
+  const requestedPath = joinLeaf(worktreeRoot, input.worktreeName);
+  assertPathWithinRoot(worktreeRoot, requestedPath);
+  // Creating the empty leaf is safe and lets the host resolve a pre-existing
+  // leaf symlink before Git can write through it.
+  const path = await host.resolveDirectory(requestedPath);
   assertPathWithinRoot(worktreeRoot, path);
   const existing = bindings.forChannel(input.channelId);
   if (
@@ -100,8 +102,17 @@ export async function prepareWorkspace(
     owned: true,
     state: "preparing",
   };
-  if (!existing?.owned && (await findWorktree(host, preparing, options.signal)))
+  let worktree = await findWorktree(host, preparing, options.signal);
+  if (!existing?.owned && worktree)
     throw new Error("Workspace path is already registered as a worktree");
+  if (existing?.owned)
+    worktree = await recoverPrunableWorktree(
+      host,
+      preparing,
+      worktree,
+      options.signal,
+    );
+  if (!worktree) await assertBranchAtBase(host, preparing, options.signal);
   bindings.set(preparing);
 
   try {
@@ -128,29 +139,8 @@ async function ensureWorktree(
 ): Promise<void> {
   let worktree = await findWorktree(host, binding, signal);
   if (!worktree) {
-    const branchRef = `refs/heads/${binding.branch}`;
-    let branchSha: string | undefined;
-    try {
-      branchSha = trimSha(
-        await runGit(
-          host.spawn,
-          binding.repoRoot,
-          [
-            "rev-parse",
-            "--verify",
-            "--end-of-options",
-            `${branchRef}^{commit}`,
-          ],
-          signal,
-        ),
-      );
-    } catch (error) {
-      if (!(error instanceof GitError)) throw error;
-    }
-    if (branchSha && branchSha !== binding.baseSha)
-      throw new Error("Workspace branch already exists at a different commit");
-
-    const addArgs = branchSha
+    const existingBranchSha = await resolveBranchSha(host, binding, signal);
+    const addArgs = existingBranchSha
       ? ["worktree", "add", binding.path, binding.branch]
       : [
           "worktree",
@@ -170,12 +160,75 @@ async function ensureWorktree(
     worktree ??= await findWorktree(host, binding, signal);
   }
   if (!worktree) throw new Error("Git did not register the new worktree");
+  if (worktree.locked)
+    throw new Error(
+      worktree.lockReason
+        ? `Workspace worktree is locked: ${worktree.lockReason}`
+        : "Workspace worktree is locked",
+    );
   if (worktree.detached || worktree.branch !== `refs/heads/${binding.branch}`)
     throw new Error("Workspace path is attached to a different branch");
 
   const commonDir = await canonicalGitCommonDir(host, binding.path, signal);
   if (!samePath(commonDir, binding.gitCommonDir))
     throw new Error("Workspace path belongs to a different repository");
+}
+
+async function assertBranchAtBase(
+  host: DesktopHost,
+  binding: WorkspaceBinding,
+  signal?: AbortSignal,
+): Promise<void> {
+  const sha = await resolveBranchSha(host, binding, signal);
+  if (sha && sha !== binding.baseSha)
+    throw new Error("Workspace branch already exists at a different commit");
+}
+
+async function resolveBranchSha(
+  host: DesktopHost,
+  binding: WorkspaceBinding,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  try {
+    return trimSha(
+      await runGit(
+        host.spawn,
+        binding.repoRoot,
+        [
+          "rev-parse",
+          "--verify",
+          "--end-of-options",
+          `refs/heads/${binding.branch}^{commit}`,
+        ],
+        signal,
+      ),
+    );
+  } catch (error) {
+    if (error instanceof GitError) return undefined;
+    throw error;
+  }
+}
+
+async function recoverPrunableWorktree(
+  host: DesktopHost,
+  binding: WorkspaceBinding,
+  worktree: GitWorktree | undefined,
+  signal?: AbortSignal,
+): Promise<GitWorktree | undefined> {
+  if (!worktree?.prunable) return worktree;
+  if (worktree.locked)
+    throw new Error(
+      worktree.lockReason
+        ? `Workspace worktree is locked: ${worktree.lockReason}`
+        : "Workspace worktree is locked",
+    );
+  await runGit(
+    host.spawn,
+    binding.repoRoot,
+    ["worktree", "remove", "--force", "--force", binding.path],
+    signal,
+  );
+  return findWorktree(host, binding, signal);
 }
 
 async function findWorktree(
