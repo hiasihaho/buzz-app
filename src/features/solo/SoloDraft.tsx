@@ -578,6 +578,16 @@ export function SoloDraft({
         throw new Error(
           "This chat's plugin can't use one of these agents. Choose another agent.",
         );
+      // A Canvas that declares worktree mode must pass the managed-block
+      // gate. Preview rendering is deliberately tolerant, but starting a chat
+      // must not silently discard a malformed worktree configuration.
+      const sourceWorkspace =
+        worktrees && setup?.canvas.includes('"worktree"')
+          ? readWorkspace(setup.canvas)
+          : undefined;
+      const selectedWorktree = sourceWorkspace
+        ? worktrees?.workspace(sourceWorkspace)
+        : undefined;
       // Finish uploads before anything is created, so a failed file blocks
       // the start instead of leaving an empty chat behind.
       const uploaded = await files.prepareForSend(new AbortController().signal);
@@ -595,9 +605,7 @@ export function SoloDraft({
           "This chat couldn't be saved on this device. Your draft is kept.",
         );
       const attached = files.snapshot();
-      const selectedWorktree = configuredWorktree(worktrees, setup?.canvas);
-      if (selectedWorktree && setup?.canvas) {
-        const sourceWorkspace = readWorkspace(setup.canvas);
+      if (selectedWorktree && sourceWorkspace && setup) {
         const binding = await worktrees?.prepare(
           channelId,
           sourceWorkspace,

@@ -1488,6 +1488,42 @@ it("ignores a hand-edited managed block without worktree mode", () => {
   expect(workspace).not.toHaveBeenCalled();
 });
 
+it("refuses to start with malformed managed metadata in worktree mode", async () => {
+  const f = setup();
+  const malformed = workspaceCanvas({
+    folders: ["/repo"],
+    worktree: { location: "/trees", baseBranch: "main" },
+    canvas: "Keep this task",
+  }).replace('"baseBranch":"main"', '"baseBranch":');
+  const prepare = vi.fn();
+  writeView("test", "solo:settings", { canvas: malformed });
+  render(
+    <SoloDraft
+      session={f.session}
+      scope="test"
+      worktrees={{
+        workspace: vi.fn(() => ({
+          repository: "/repo",
+          location: "/trees",
+          baseBranch: "main",
+        })),
+        prepare,
+      }}
+      onStarted={vi.fn()}
+    />,
+  );
+  const user = userEvent.setup();
+  const input = screen.getByRole("textbox");
+  await user.type(input, "Do not lose me");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Workspace metadata is invalid",
+  );
+  expect(input).toHaveTextContent("Do not lose me");
+  expect(prepare).not.toHaveBeenCalled();
+  expect(f.channelWrites.create).not.toHaveBeenCalled();
+});
+
 it("prepares a configured worktree before creating the Solo chat", async () => {
   vi.stubGlobal("crypto", webcrypto);
   const f = setup();
