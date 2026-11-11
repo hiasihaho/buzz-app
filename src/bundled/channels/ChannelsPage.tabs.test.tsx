@@ -47,6 +47,8 @@ import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { BrowserHostView } from "../../features/browser/BrowserHostView";
 import { BrowserSessions } from "../../features/browser/sessions";
 import type { BrowserPlatform } from "../../features/browser/platform";
+import { WorktreeDiffPanel } from "../worktrees/panel";
+import type { Worktrees } from "../worktrees/service";
 
 const highlighted = vi.hoisted(() => ({
   root: undefined as string | undefined,
@@ -411,6 +413,41 @@ it.each([
     host.dispose();
   },
 );
+
+it("gives a chat-menu-opened local diff panel its originating chat context", async () => {
+  const diff = vi.fn(async (channelId: string) => ({
+    content: "",
+    path: `/trees/${channelId}`,
+    branch: `buzz/${channelId}`,
+    status: {
+      state: "ready" as const,
+      path: `/trees/${channelId}`,
+      branch: `buzz/${channelId}`,
+      detached: false,
+      dirty: false,
+      fileCount: 0,
+    },
+  }));
+  const worktrees: Worktrees = {
+    has: () => true,
+    diff,
+    workspace: () => undefined,
+    prepare: async () => undefined,
+  };
+  const h = await page("solo", undefined, false, (props) => (
+    <WorktreeDiffPanel {...props} worktrees={worktrees} />
+  ));
+  act(() =>
+    expect(
+      h.panels.requestOpen({
+        channelId: "alpha",
+        target: "https://app.example/",
+      }),
+    ).toBe(true),
+  );
+  expect(await screen.findByText("buzz/alpha")).toBeVisible();
+  expect(diff).toHaveBeenCalledWith("alpha", expect.any(AbortSignal));
+});
 
 it.each(["side", "main"] as const)(
   "agent-opened apps preserve their routed %s thread",

@@ -4,6 +4,8 @@ type Spawn = NonNullable<Host["spawn"]>;
 
 export class GitUnavailable extends Error {}
 
+export class GitOutputTooLarge extends Error {}
+
 export class GitError extends Error {
   constructor(
     message: string,
@@ -24,11 +26,14 @@ export async function runGit(
   args: readonly string[],
   signal?: AbortSignal,
   deadlineMs = DEADLINE_MS,
+  maxOutputBytes = Number.POSITIVE_INFINITY,
 ): Promise<string> {
   signal?.throwIfAborted();
   if (!absolutePath(repoPath, nativePathStyle()))
     throw new GitError("Git path must be absolute on this platform", null, "");
   let stdout = "";
+  let stdoutBytes = 0;
+  let outputTooLarge = false;
   let stderr = "";
   let process: Awaited<ReturnType<Spawn>>;
   try {
@@ -36,7 +41,13 @@ export async function runGit(
       args: ["--no-optional-locks", "-C", repoPath, ...args],
       env: { LC_ALL: "C" },
       onStdout: (data) => {
-        stdout += data;
+        if (outputTooLarge) return;
+        stdoutBytes += new TextEncoder().encode(data).length;
+        if (stdoutBytes > maxOutputBytes) {
+          outputTooLarge = true;
+          stdout = "";
+          void process?.kill();
+        } else stdout += data;
       },
       onStderr: (data) => {
         stderr += data;
@@ -47,6 +58,7 @@ export async function runGit(
       error instanceof Error ? error.message : String(error),
     );
   }
+  if (outputTooLarge) void process.kill();
   const timeout = AbortSignal.timeout(deadlineMs);
   const abort = AbortSignal.any(signal ? [signal, timeout] : [timeout]);
   const stop = () => void process.kill();
@@ -59,6 +71,10 @@ export async function runGit(
     await process.end().catch(() => undefined);
     const code = await process.exited;
     abort.throwIfAborted();
+    if (outputTooLarge)
+      throw new GitOutputTooLarge(
+        `Git output exceeds ${maxOutputBytes} bytes`,
+      );
     if (code === 0) return stdout;
     const reason = stderr.trim() || `git exited with code ${code ?? "unknown"}`;
     throw new GitError(reason, code, stderr);

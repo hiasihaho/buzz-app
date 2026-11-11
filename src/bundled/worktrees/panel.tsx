@@ -25,10 +25,11 @@ function message(reason: unknown) {
 
 export function WorktreeDiffPanel({
   worktrees,
+  context,
   channelContext,
-}: Pick<PanelProps, "channelContext"> & { worktrees: Worktrees }) {
+}: Pick<PanelProps, "context" | "channelContext"> & { worktrees: Worktrees }) {
   usePanelTabTitle("Local changes", tabIcon);
-  const channelId = channelContext?.channelId;
+  const channelId = context?.channelId ?? channelContext?.channelId;
   const [state, setState] = useState<{
     channelId: string;
     result: WorktreeDiff | Error;

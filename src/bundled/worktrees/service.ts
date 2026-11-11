@@ -6,6 +6,7 @@ import { reconcileWorkspaceStatus, type WorkspaceStatus } from "./status";
 import { runGit } from "./git";
 
 const INSTALL_ID_KEY = "buzz.worktrees.install.v1";
+const MAX_DIFF_BYTES = 2_000_000;
 
 export type WorktreeWorkspace = Readonly<{
   repository: string;
@@ -87,8 +88,19 @@ export function createWorktrees(
       const content = await runGit(
         desktop.spawn,
         binding.path,
-        ["diff", "--no-ext-diff", "--full-index", "HEAD", "--"],
+        [
+          "diff",
+          "--no-ext-diff",
+          "--no-color",
+          "--src-prefix=a/",
+          "--dst-prefix=b/",
+          "--full-index",
+          "HEAD",
+          "--",
+        ],
         signal,
+        undefined,
+        MAX_DIFF_BYTES,
       );
       return { content, path: binding.path, branch: binding.branch, status };
     },

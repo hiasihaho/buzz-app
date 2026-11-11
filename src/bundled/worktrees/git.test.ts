@@ -3,6 +3,7 @@ import type { Host, HostProcessOptions } from "../../features/host/service";
 import {
   assertPathWithinRoot,
   GitError,
+  GitOutputTooLarge,
   GitUnavailable,
   parseStatus,
   parseWorktreeList,
@@ -97,6 +98,14 @@ it("rejects Windows paths on POSIX", async () => {
     "Git path must be absolute on this platform",
   );
   expect(spawn).not.toHaveBeenCalled();
+});
+
+it("stops git without retaining stdout beyond the caller's limit", async () => {
+  const { spawn, kill } = fakeSpawn("larger than five bytes");
+  await expect(
+    runGit(spawn, "/repo", ["diff"], undefined, undefined, 5),
+  ).rejects.toEqual(new GitOutputTooLarge("Git output exceeds 5 bytes"));
+  expect(kill).toHaveBeenCalledOnce();
 });
 
 it("stops git at its deadline", async () => {
