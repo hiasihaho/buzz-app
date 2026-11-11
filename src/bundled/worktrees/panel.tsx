@@ -98,7 +98,7 @@ export function registerWorktreeDiff(ctx: Context, worktrees: Worktrees) {
     matches: (value) => value.startsWith(targetPrefix),
     channelMenu: {
       label: "View local changes",
-      eligible: (channel) => worktrees.has(channel.id),
+      eligible: (channel) => worktrees.canDiff(channel.id),
     },
     channelPlacement: "side",
     component: (props) => (
@@ -106,7 +106,7 @@ export function registerWorktreeDiff(ctx: Context, worktrees: Worktrees) {
     ),
   });
   ctx.conversation.registerChatMenu(({ channelId }) =>
-    worktrees.has(channelId) ? (
+    worktrees.canDiff(channelId) ? (
       <MenuItem
         onClick={() =>
           ctx.panels.requestOpen({

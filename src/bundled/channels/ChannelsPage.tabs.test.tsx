@@ -430,11 +430,14 @@ it("gives a chat-menu-opened local diff panel its originating chat context", asy
   }));
   const worktrees: Worktrees = {
     has: () => true,
+    canDiff: () => true,
     summary: async () => ({
       repository: "/repo",
       path: "/trees/alpha",
       branch: "buzz/alpha",
       baseRef: "main",
+      baseSha: "b".repeat(40),
+      lifecycle: "ready",
       status: {
         state: "ready",
         path: "/trees/alpha",
@@ -448,6 +451,15 @@ it("gives a chat-menu-opened local diff panel its originating chat context", asy
     diff,
     workspace: () => undefined,
     prepare: async () => undefined,
+    previewFinish: async () => {
+      throw new Error("not implemented");
+    },
+    remove: async () => {
+      throw new Error("not implemented");
+    },
+    recover: async () => {
+      throw new Error("not implemented");
+    },
   };
   const h = await page("solo", undefined, false, (props) => (
     <WorktreeDiffPanel {...props} worktrees={worktrees} />

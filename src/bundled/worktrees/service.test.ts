@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Host } from "../../features/host/service";
 import { BindingStore, type WorkspaceBinding } from "./binding";
-import { createWorktrees, preparedWorkspaceCanvas } from "./service";
+import {
+  createWorktrees,
+  preparedWorkspaceCanvas,
+  removedWorkspaceCanvas,
+} from "./service";
 import type { Workspace } from "../../features/solo/workspace";
 
 const workspace: Workspace = {
@@ -49,6 +53,36 @@ describe("worktree chat service", () => {
     expect(canvas).not.toContain("Before starting new work");
     expect(canvas).toContain("Keep this instruction.");
   });
+
+  it("removes the managed worktree path while preserving authored Canvas text", () => {
+    const binding: WorkspaceBinding = {
+      bindingId: "binding",
+      channelId: "channel",
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task-abcd",
+      branch: "buzz/task-abcd",
+      baseRef: "main",
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 1,
+      installId: "install",
+      owned: true,
+      state: "removed",
+    };
+    const authored = "# Goal\n\nKeep this instruction exactly.\n";
+    const prepared = preparedWorkspaceCanvas(
+      { ...workspace, canvas: authored },
+      { ...binding, state: "ready" },
+    );
+    const removed = removedWorkspaceCanvas(prepared, binding);
+    expect(removed).not.toContain(binding.path);
+    expect(removed).toContain(
+      `Branch \`${binding.branch}\` and its commits remain`,
+    );
+    expect(removed.endsWith(authored)).toBe(true);
+  });
+
   it("exposes one configured repository only when desktop Git is available", () => {
     expect(createWorktrees({}, storage()).workspace(workspace)).toBeUndefined();
     expect(

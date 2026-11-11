@@ -128,7 +128,7 @@ function store(value: WorkspaceBinding = binding) {
   };
 }
 
-const available = async () => ({ agents: [], terminals: [] });
+const available = async () => ({ agents: [] });
 const options = { installId: binding.installId, inspectUse: available };
 
 function safePreviewOutputs() {
@@ -280,16 +280,20 @@ describe("safe worktree finish", () => {
       binding.bindingId,
       {
         ...options,
-        inspectUse: async () => ({ agents: ["agent"], terminals: ["shell"] }),
+        inspectUse: async () => ({ agents: ["agent"] }),
       },
     );
     expect(result.blockers).toEqual([
       expect.objectContaining({ kind: "binding-state" }),
       expect.objectContaining({ kind: "locked" }),
       expect.objectContaining({ kind: "repository" }),
-      expect.objectContaining({ kind: "dirty", count: 2 }),
-      expect.objectContaining({ kind: "ignored", count: 1 }),
-      expect.objectContaining({ kind: "usage", count: 2 }),
+      expect.objectContaining({
+        kind: "dirty",
+        count: 2,
+        paths: ["tracked.txt", "new.txt"],
+      }),
+      expect.objectContaining({ kind: "ignored", count: 1, paths: [".env"] }),
+      expect.objectContaining({ kind: "usage", count: 1 }),
     ]);
   });
 
@@ -616,7 +620,7 @@ describe("safe worktree finish", () => {
           ...options,
           inspectUse: async () => {
             await writeFile(raced, "late\n");
-            return { agents: [], terminals: [] };
+            return { agents: [] };
           },
         }),
       ).rejects.toThrow(/modified or untracked files/);

@@ -38,17 +38,29 @@ function result(channelId = "alpha"): WorktreeDiff {
 function service(diff: Worktrees["diff"]): Worktrees {
   return {
     has: () => true,
+    canDiff: () => true,
     summary: async () => ({
       repository: "/repo",
       path: "/trees/task",
       branch: "buzz/task",
       baseRef: "main",
+      baseSha: "b".repeat(40),
+      lifecycle: "ready",
       status,
       unpublishedCommits: 0,
     }),
     diff,
     workspace: () => undefined,
     prepare: async () => undefined,
+    previewFinish: async () => {
+      throw new Error("not implemented");
+    },
+    remove: async () => {
+      throw new Error("not implemented");
+    },
+    recover: async () => {
+      throw new Error("not implemented");
+    },
   };
 }
 
@@ -153,6 +165,7 @@ it("registers a side panel and opens it from the chat menu only for a local bind
   const worktrees: Worktrees = {
     ...service(vi.fn(async () => result())),
     has: (channelId) => available.has(channelId),
+    canDiff: (channelId) => available.has(channelId),
   };
   registerWorktreeDiff(
     {

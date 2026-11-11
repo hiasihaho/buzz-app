@@ -27,11 +27,11 @@ export type FinishBlocker = Readonly<{
   kind: FinishBlockerKind;
   message: string;
   count?: number;
+  paths?: readonly string[];
 }>;
 
 export type WorkspaceUse = Readonly<{
   agents: readonly string[];
-  terminals: readonly string[];
 }>;
 
 export type WorkspaceFinishPreview = Readonly<{
@@ -113,26 +113,23 @@ export async function previewWorkspaceFinish(
       options.signal,
     ),
   );
-  const tracked = status.entries.filter(
-    ({ kind }) => kind !== "untracked" && kind !== "ignored",
-  ).length;
-  const untracked = status.entries.filter(
-    ({ kind }) => kind === "untracked",
-  ).length;
-  const ignored = status.entries.filter(
+  const dirtyEntries = status.entries.filter(({ kind }) => kind !== "ignored");
+  const ignoredEntries = status.entries.filter(
     ({ kind }) => kind === "ignored",
-  ).length;
-  if (tracked + untracked > 0)
+  );
+  if (dirtyEntries.length > 0)
     blockers.push({
       kind: "dirty",
       message: "Worktree has tracked or untracked changes",
-      count: tracked + untracked,
+      count: dirtyEntries.length,
+      paths: dirtyEntries.map(({ path }) => path),
     });
-  if (ignored > 0)
+  if (ignoredEntries.length > 0)
     blockers.push({
       kind: "ignored",
       message: "Worktree has ignored files",
-      count: ignored,
+      count: ignoredEntries.length,
+      paths: ignoredEntries.map(({ path }) => path),
     });
 
   const head = status.oid ?? worktree.head;
@@ -159,19 +156,17 @@ export async function previewWorkspaceFinish(
 
   try {
     const use = await options.inspectUse(binding, options.signal);
-    const count = use.agents.length + use.terminals.length;
-    if (count > 0)
+    if (use.agents.length > 0)
       blockers.push({
         kind: "usage",
-        message: "Agents or terminals are using this worktree",
-        count,
+        message: "Agents are working in this chat",
+        count: use.agents.length,
       });
   } catch {
     options.signal?.throwIfAborted();
     blockers.push({
       kind: "usage-unknown",
-      message:
-        "Could not verify whether agents or terminals are using this worktree",
+      message: "Could not verify whether agents are working in this chat",
     });
   }
   return {

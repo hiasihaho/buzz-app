@@ -1,9 +1,18 @@
 import type { Host } from "../../features/host/service";
-import { type Workspace, workspaceCanvas } from "../../features/solo/workspace";
+import {
+  type Workspace,
+  workspaceCanvas,
+  workspaceDirectories,
+} from "../../features/solo/workspace";
 import { BindingStore, type WorkspaceBinding } from "./binding";
 import { prepareWorkspace, WorkspaceIntentConflict } from "./prepare";
 import { reconcileWorkspaceStatus, type WorkspaceStatus } from "./status";
-import { recoverWorkspaceRemoval } from "./finish";
+import {
+  previewWorkspaceFinish,
+  recoverWorkspaceRemoval,
+  removeWorkspace,
+  type WorkspaceFinishPreview,
+} from "./finish";
 import { countUnpublishedCommits, runGit } from "./git";
 
 const INSTALL_ID_KEY = "buzz.worktrees.install.v1";
@@ -27,7 +36,9 @@ export type WorktreeSummary = Readonly<{
   path: string;
   branch: string;
   baseRef: string;
-  status: WorkspaceStatus;
+  baseSha: string;
+  lifecycle: WorkspaceBinding["state"];
+  status?: WorkspaceStatus;
   /** Local evidence only: commits not reached by any local remote-tracking ref. */
   unpublishedCommits?: number;
 }>;
@@ -45,9 +56,24 @@ export type WorktreePreparation = Readonly<{
 export type Worktrees = WorktreePreparation &
   Readonly<{
     has(channelId: string): boolean;
+    canDiff(channelId: string): boolean;
     summary(channelId: string, signal?: AbortSignal): Promise<WorktreeSummary>;
     diff(channelId: string, signal?: AbortSignal): Promise<WorktreeDiff>;
+    previewFinish(
+      channelId: string,
+      inspectAgents: () => readonly string[],
+      signal?: AbortSignal,
+    ): Promise<WorkspaceFinishPreview>;
+    remove(
+      channelId: string,
+      expectedHead: string,
+      inspectAgents: () => readonly string[],
+      signal?: AbortSignal,
+    ): Promise<WorkspaceBinding>;
+    recover(channelId: string): Promise<WorkspaceBinding>;
   }>;
+
+const workspaceBlockEnd = "<!-- /buzz-session-workspace -->";
 
 /** Replaces create-time instructions with the worktree Buzz already prepared. */
 export function preparedWorkspaceCanvas(
@@ -64,6 +90,43 @@ export function preparedWorkspaceCanvas(
     value.canvas,
   ].join("\n");
   return workspaceCanvas({ folders: [binding.path], canvas: instructions });
+}
+
+/** Retires Buzz's generated workspace text and preserves authored Canvas text. */
+export function removedWorkspaceCanvas(
+  content: string,
+  binding: Pick<
+    WorkspaceBinding,
+    "path" | "branch" | "repoRoot" | "baseRef" | "baseSha"
+  >,
+): string {
+  const retained = `Branch \`${binding.branch}\` and its commits remain in the repository.`;
+  if (!workspaceDirectories(content).includes(binding.path)) {
+    if (content.includes(retained)) return content;
+    throw new Error("Canvas no longer names this worktree");
+  }
+  const end = content.indexOf(workspaceBlockEnd);
+  if (end < 0) throw new Error("Workspace Canvas block is missing");
+  const suffix = content
+    .slice(end + workspaceBlockEnd.length)
+    .replace(/^\n\n/, "");
+  const generated = [
+    "## Prepared worktree",
+    "",
+    `- Work in \`${binding.path}\` on branch \`${binding.branch}\`.`,
+    `- The repository checkout \`${binding.repoRoot}\` is read-only reference; do not change it directly.`,
+    `- The worktree already exists from \`${binding.baseRef}\` at \`${binding.baseSha}\`; do not create another worktree.`,
+    "",
+  ].join("\n");
+  if (!suffix.startsWith(generated))
+    throw new Error("Canvas prepared-worktree instructions changed");
+  const authored = suffix.slice(generated.length);
+  return [
+    "## Worktree removed",
+    "",
+    `The local worktree was removed. Branch \`${binding.branch}\` and its commits remain in the repository.`,
+    ...(authored ? ["", authored] : []),
+  ].join("\n");
 }
 
 export function createWorktrees(
@@ -99,12 +162,25 @@ export function createWorktrees(
   return {
     has(channelId) {
       const binding = bindings.forChannel(channelId);
+      return !!desktop && binding?.owned === true;
+    },
+    canDiff(channelId) {
+      const binding = bindings.forChannel(channelId);
       return !!desktop && binding?.owned === true && binding.state === "ready";
     },
     async summary(channelId, signal) {
       if (!desktop) throw new Error("Local Git is unavailable");
       await recovery;
-      const binding = readyBinding(bindings, channelId);
+      const binding = ownedChannelBinding(bindings, channelId);
+      if (binding.state !== "ready")
+        return {
+          repository: binding.repoRoot,
+          path: binding.path,
+          branch: binding.branch,
+          baseRef: binding.baseRef,
+          baseSha: binding.baseSha,
+          lifecycle: binding.state,
+        };
       const status = await readyStatus(desktop.spawn, binding, signal);
       const unpublishedCommits = await countUnpublishedCommits(
         desktop.spawn,
@@ -116,6 +192,8 @@ export function createWorktrees(
         path: binding.path,
         branch: binding.branch,
         baseRef: binding.baseRef,
+        baseSha: binding.baseSha,
+        lifecycle: binding.state,
         status,
         ...(unpublishedCommits !== undefined && { unpublishedCommits }),
       };
@@ -143,6 +221,47 @@ export function createWorktrees(
         MAX_DIFF_BYTES,
       );
       return { content, path: binding.path, branch: binding.branch, status };
+    },
+    async previewFinish(channelId, inspectAgents, signal) {
+      if (!desktop) throw new Error("Local Git is unavailable");
+      await recovery;
+      const binding = ownedChannelBinding(bindings, channelId);
+      return previewWorkspaceFinish(
+        desktop.spawn,
+        bindings,
+        binding.bindingId,
+        {
+          installId: binding.installId,
+          inspectUse: async () => ({ agents: inspectAgents() }),
+          ...(signal ? { signal } : {}),
+        },
+      );
+    },
+    async remove(channelId, expectedHead, inspectAgents, signal) {
+      if (!desktop) throw new Error("Local Git is unavailable");
+      await recovery;
+      const binding = ownedChannelBinding(bindings, channelId);
+      return removeWorkspace(
+        desktop.spawn,
+        bindings,
+        binding.bindingId,
+        expectedHead,
+        {
+          installId: binding.installId,
+          inspectUse: async () => ({ agents: inspectAgents() }),
+          ...(signal ? { signal } : {}),
+        },
+      );
+    },
+    async recover(channelId) {
+      if (!desktop) throw new Error("Local Git is unavailable");
+      const binding = ownedChannelBinding(bindings, channelId);
+      return recoverWorkspaceRemoval(
+        desktop.spawn,
+        bindings,
+        binding.bindingId,
+        binding.installId,
+      );
     },
     workspace(value) {
       return desktop ? workspace(value) : undefined;
@@ -183,12 +302,21 @@ export function createWorktrees(
   };
 }
 
-function readyBinding(
+function ownedChannelBinding(
   bindings: BindingStore,
   channelId: string,
 ): WorkspaceBinding {
   const binding = bindings.forChannel(channelId);
-  if (!binding?.owned || binding.state !== "ready")
+  if (!binding?.owned) throw new Error("This chat has no owned local worktree");
+  return binding;
+}
+
+function readyBinding(
+  bindings: BindingStore,
+  channelId: string,
+): WorkspaceBinding {
+  const binding = ownedChannelBinding(bindings, channelId);
+  if (binding.state !== "ready")
     throw new Error("This chat has no ready local worktree");
   return binding;
 }

@@ -2431,6 +2431,8 @@ function ChannelWorkspace({
           <WorktreeStatusBar
             channelId={current.id}
             worktrees={worktrees}
+            session={queries}
+            canvas={queries.canvas}
             agentWorking={workingChannels.has(current.id)}
             openDiff={() =>
               panels.requestOpen({
