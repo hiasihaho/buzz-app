@@ -272,7 +272,8 @@ async function recoverRemovalState(
   binding: WorkspaceBinding,
   expectedHead?: string,
 ): Promise<"ready" | "removed"> {
-  const worktrees = parseWorktreeList(
+  await assertRepositoryIdentity(spawn, binding);
+  let worktrees = parseWorktreeList(
     await runGit(spawn, binding.repoRoot, [
       "worktree",
       "list",
@@ -280,18 +281,46 @@ async function recoverRemovalState(
       "-z",
     ]),
   );
-  const worktree = worktrees.find(({ path }) => samePath(path, binding.path));
+  let worktree = worktrees.find(({ path }) => samePath(path, binding.path));
   if (!worktree) return "removed";
   if (
-    worktree.prunable ||
     worktree.detached ||
     !worktree.head ||
     !validSha(worktree.head) ||
     worktree.branch !== `refs/heads/${binding.branch}` ||
-    (expectedHead &&
-      worktree.head?.toLowerCase() !== expectedHead.toLowerCase())
+    (expectedHead && worktree.head.toLowerCase() !== expectedHead.toLowerCase())
   )
     throw new Error("Worktree state is unknown after failed removal");
+  const branchHead = trimSha(
+    await runGit(spawn, binding.repoRoot, [
+      "rev-parse",
+      "--verify",
+      "--end-of-options",
+      `refs/heads/${binding.branch}^{commit}`,
+    ]),
+  );
+  if (branchHead !== worktree.head.toLowerCase())
+    throw new Error("Workspace branch changed during removal");
+  if (worktree.prunable) {
+    await runGit(spawn, binding.repoRoot, [
+      "worktree",
+      "remove",
+      "--",
+      binding.path,
+    ]);
+    worktrees = parseWorktreeList(
+      await runGit(spawn, binding.repoRoot, [
+        "worktree",
+        "list",
+        "--porcelain",
+        "-z",
+      ]),
+    );
+    worktree = worktrees.find(({ path }) => samePath(path, binding.path));
+    if (worktree)
+      throw new Error("Git still reports the prunable worktree after removal");
+    return "removed";
+  }
   const commonDir = trimLine(
     await runGit(spawn, binding.path, [
       "rev-parse",
@@ -303,6 +332,22 @@ async function recoverRemovalState(
   if (!samePath(commonDir, binding.gitCommonDir))
     throw new Error("Worktree repository changed after failed removal");
   return "ready";
+}
+
+async function assertRepositoryIdentity(
+  spawn: Spawn,
+  binding: WorkspaceBinding,
+): Promise<void> {
+  const commonDir = trimLine(
+    await runGit(spawn, binding.repoRoot, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]),
+    "Git common directory",
+  );
+  if (!samePath(commonDir, binding.gitCommonDir))
+    throw new Error("Workspace repository changed during removal");
 }
 
 function ownedBinding(

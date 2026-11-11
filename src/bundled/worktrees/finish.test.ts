@@ -308,7 +308,9 @@ describe("safe worktree finish", () => {
       ...safePreviewOutputs(),
       `${sha}\n`,
       { code: 128, stderr: "fatal: worktree contains modified files\n" },
+      "/repo/.git\n",
       listed(),
+      `${sha}\n`,
       "/repo/.git\n",
     ]);
     await expect(
@@ -327,7 +329,9 @@ describe("safe worktree finish", () => {
       ...safePreviewOutputs(),
       `${sha}\n`,
       "",
+      "/repo/.git\n",
       listed(),
+      `${sha}\n`,
       "/repo/.git\n",
     ]);
     const spawn = vi.fn(async (id: string, value: HostProcessOptions = {}) => {
@@ -348,7 +352,7 @@ describe("safe worktree finish", () => {
     const registered = store({ ...binding, state: "removing" });
     await expect(
       recoverWorkspaceRemoval(
-        git([listed(), "/repo/.git\n"]),
+        git(["/repo/.git\n", listed(), `${sha}\n`, "/repo/.git\n"]),
         registered,
         binding.bindingId,
         binding.installId,
@@ -358,12 +362,57 @@ describe("safe worktree finish", () => {
     const absent = store({ ...binding, state: "removing" });
     await expect(
       recoverWorkspaceRemoval(
-        git([`worktree /repo\0HEAD ${sha}\0branch refs/heads/main\0\0`]),
+        git([
+          "/repo/.git\n",
+          `worktree /repo\0HEAD ${sha}\0branch refs/heads/main\0\0`,
+        ]),
         absent,
         binding.bindingId,
         binding.installId,
       ),
     ).resolves.toMatchObject({ state: "removed" });
+  });
+
+  it("finishes an interrupted removal whose registration is prunable", async () => {
+    const saved = store({ ...binding, state: "removing" });
+    const remaining = `worktree /repo\0HEAD ${"c".repeat(40)}\0branch refs/heads/main\0\0`;
+    const spawn = git([
+      "/repo/.git\n",
+      listed(binding, "prunable gitdir file points to non-existent location"),
+      `${sha}\n`,
+      "",
+      remaining,
+    ]);
+    await expect(
+      recoverWorkspaceRemoval(
+        spawn,
+        saved,
+        binding.bindingId,
+        binding.installId,
+      ),
+    ).resolves.toMatchObject({ state: "removed" });
+    expect(spawn.mock.calls.at(-2)?.[1]?.args).toEqual([
+      "--no-optional-locks",
+      "-C",
+      binding.repoRoot,
+      "worktree",
+      "remove",
+      "--",
+      binding.path,
+    ]);
+  });
+
+  it("does not call an absent worktree removed after the repository is replaced", async () => {
+    const saved = store({ ...binding, state: "removing" });
+    await expect(
+      recoverWorkspaceRemoval(
+        git(["/replacement/.git\n"]),
+        saved,
+        binding.bindingId,
+        binding.installId,
+      ),
+    ).rejects.toThrow("repository changed during removal");
+    expect(saved.current().state).toBe("failed");
   });
 
   it("keeps failed when the post-error worktree state cannot be reconciled", async () => {
@@ -458,6 +507,22 @@ describe("safe worktree finish", () => {
       await rm(raced);
       await expect(
         removeWorkspace(realSpawn(), saved, actual.bindingId, head, options),
+      ).resolves.toMatchObject({ state: "removed" });
+      expect(run(repoRoot, ["rev-parse", "refs/heads/buzz/task"])).toBe(head);
+      expect(run(repoRoot, ["worktree", "list", "--porcelain"])).not.toContain(
+        path,
+      );
+
+      run(repoRoot, ["worktree", "add", "-q", path, "buzz/task"]);
+      await rm(path, { recursive: true });
+      saved.set({ ...actual, state: "removing" });
+      await expect(
+        recoverWorkspaceRemoval(
+          realSpawn(),
+          saved,
+          actual.bindingId,
+          actual.installId,
+        ),
       ).resolves.toMatchObject({ state: "removed" });
       expect(run(repoRoot, ["rev-parse", "refs/heads/buzz/task"])).toBe(head);
       expect(run(repoRoot, ["worktree", "list", "--porcelain"])).not.toContain(

@@ -62,6 +62,48 @@ describe("worktree chat service", () => {
     ).toEqual({ repository: "/repo", location: "/trees", baseBranch: "main" });
   });
 
+  it("recovers interrupted removals when the desktop service starts", async () => {
+    const saved = storage();
+    saved.setItem("buzz.worktrees.install.v1", "install");
+    const binding: WorkspaceBinding = {
+      bindingId: "binding",
+      channelId: "channel",
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task",
+      branch: "buzz/task",
+      baseRef: "main",
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 1,
+      installId: "install",
+      owned: true,
+      state: "removing",
+    };
+    new BindingStore(saved).set(binding);
+    const spawn: NonNullable<Host["spawn"]> = vi.fn(
+      async (_id, options = {}) => {
+        const args = options.args ?? [];
+        const stdout = args.includes("rev-parse")
+          ? "/repo/.git\n"
+          : `worktree /repo\0HEAD ${"b".repeat(40)}\0branch refs/heads/main\0\0`;
+        options.onStdout?.(stdout);
+        return {
+          write: async () => {},
+          end: async () => {},
+          kill: async () => {},
+          exited: Promise.resolve(0),
+        };
+      },
+    );
+    createWorktrees({ spawn, resolveDirectory: async (path) => path }, saved);
+    await vi.waitFor(() =>
+      expect(new BindingStore(saved).get(binding.bindingId)?.state).toBe(
+        "removed",
+      ),
+    );
+  });
+
   it("reads a combined staged and unstaged diff only after reconciling the chat binding", async () => {
     const saved = storage();
     const binding: WorkspaceBinding = {

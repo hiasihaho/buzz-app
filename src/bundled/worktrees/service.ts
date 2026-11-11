@@ -3,6 +3,7 @@ import { type Workspace, workspaceCanvas } from "../../features/solo/workspace";
 import { BindingStore, type WorkspaceBinding } from "./binding";
 import { prepareWorkspace, WorkspaceIntentConflict } from "./prepare";
 import { reconcileWorkspaceStatus, type WorkspaceStatus } from "./status";
+import { recoverWorkspaceRemoval } from "./finish";
 import { runGit } from "./git";
 
 const INSTALL_ID_KEY = "buzz.worktrees.install.v1";
@@ -63,6 +64,27 @@ export function createWorktrees(
     host.spawn && host.resolveDirectory
       ? { spawn: host.spawn, resolveDirectory: host.resolveDirectory }
       : undefined;
+  const savedInstallId = storage.getItem(INSTALL_ID_KEY);
+  const recovery = desktop
+    ? Promise.allSettled(
+        bindings
+          .all()
+          .flatMap((binding) =>
+            binding.owned &&
+            binding.state === "removing" &&
+            savedInstallId === binding.installId
+              ? [
+                  recoverWorkspaceRemoval(
+                    desktop.spawn,
+                    bindings,
+                    binding.bindingId,
+                    savedInstallId,
+                  ),
+                ]
+              : [],
+          ),
+      )
+    : Promise.resolve([]);
   return {
     has(channelId) {
       const binding = bindings.forChannel(channelId);
@@ -70,6 +92,7 @@ export function createWorktrees(
     },
     async diff(channelId, signal) {
       if (!desktop) throw new Error("Local Git is unavailable");
+      await recovery;
       const binding = bindings.forChannel(channelId);
       if (!binding?.owned || binding.state !== "ready")
         throw new Error("This chat has no ready local worktree");
@@ -110,6 +133,7 @@ export function createWorktrees(
     async prepare(channelId, value, task, signal) {
       const selected = desktop ? workspace(value) : undefined;
       if (!selected || !desktop) return undefined;
+      await recovery;
       const suffix = channelId.replaceAll("-", "").slice(0, 4).toLowerCase();
       const slug = taskSlug(task);
       const existing = bindings.forChannel(channelId);
