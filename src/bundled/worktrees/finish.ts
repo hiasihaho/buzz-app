@@ -164,6 +164,7 @@ export async function previewWorkspaceFinish(
         count,
       });
   } catch {
+    options.signal?.throwIfAborted();
     blockers.push({
       kind: "usage-unknown",
       message:
@@ -175,6 +176,26 @@ export async function previewWorkspaceFinish(
     head: head.toLowerCase(),
     unpublishedCommits,
   };
+}
+
+/** Reconciles a persisted removal interrupted by an app or process exit. */
+export async function recoverWorkspaceRemoval(
+  spawn: Spawn,
+  bindings: Pick<BindingStore, "get" | "set">,
+  bindingId: string,
+  installId: string,
+): Promise<WorkspaceBinding> {
+  const binding = ownedBinding(bindings, bindingId, installId);
+  if (binding.state !== "removing") return binding;
+  try {
+    const state = await recoverRemovalState(spawn, binding);
+    const recovered = { ...binding, state } as const;
+    bindings.set(recovered);
+    return recovered;
+  } catch (error) {
+    bindings.set({ ...binding, state: "failed" });
+    throw error;
+  }
 }
 
 /** Removes only the exact previewed HEAD after a fresh fail-closed preview. */
@@ -228,9 +249,60 @@ export async function removeWorkspace(
     bindings.set(removed);
     return removed;
   } catch (error) {
-    bindings.set({ ...binding, state: "failed" });
+    const recovered = await recoverRemovalState(
+      spawn,
+      binding,
+      expectedHead,
+    ).catch(() => undefined);
+    if (recovered === "removed") {
+      const removed = { ...binding, state: "removed" } as const;
+      bindings.set(removed);
+      return removed;
+    }
+    bindings.set({
+      ...binding,
+      state: recovered === "ready" ? "ready" : "failed",
+    });
     throw error;
   }
+}
+
+async function recoverRemovalState(
+  spawn: Spawn,
+  binding: WorkspaceBinding,
+  expectedHead?: string,
+): Promise<"ready" | "removed"> {
+  const worktrees = parseWorktreeList(
+    await runGit(spawn, binding.repoRoot, [
+      "worktree",
+      "list",
+      "--porcelain",
+      "-z",
+    ]),
+  );
+  const worktree = worktrees.find(({ path }) => samePath(path, binding.path));
+  if (!worktree) return "removed";
+  if (
+    worktree.prunable ||
+    worktree.detached ||
+    !worktree.head ||
+    !validSha(worktree.head) ||
+    worktree.branch !== `refs/heads/${binding.branch}` ||
+    (expectedHead &&
+      worktree.head?.toLowerCase() !== expectedHead.toLowerCase())
+  )
+    throw new Error("Worktree state is unknown after failed removal");
+  const commonDir = trimLine(
+    await runGit(spawn, binding.path, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]),
+    "Git common directory",
+  );
+  if (!samePath(commonDir, binding.gitCommonDir))
+    throw new Error("Worktree repository changed after failed removal");
+  return "ready";
 }
 
 function ownedBinding(

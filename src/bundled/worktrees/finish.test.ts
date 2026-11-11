@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { Host, HostProcessOptions } from "../../features/host/service";
 import type { WorkspaceBinding } from "./binding";
-import { previewWorkspaceFinish, removeWorkspace } from "./finish";
+import {
+  previewWorkspaceFinish,
+  recoverWorkspaceRemoval,
+  removeWorkspace,
+} from "./finish";
 
 const sha = "a".repeat(40);
 const binding: WorkspaceBinding = {
@@ -298,17 +302,101 @@ describe("safe worktree finish", () => {
     expect(spawn.mock.calls.at(-2)?.[1]?.args).not.toContain("--force");
   });
 
-  it("records a failed lifecycle when Git cannot remove the worktree", async () => {
+  it("restores ready after a rejected remove leaves the same worktree intact", async () => {
     const saved = store();
     const spawn = git([
       ...safePreviewOutputs(),
       `${sha}\n`,
       { code: 128, stderr: "fatal: worktree contains modified files\n" },
+      listed(),
+      "/repo/.git\n",
     ]);
     await expect(
       removeWorkspace(spawn, saved, binding.bindingId, sha, options),
     ).rejects.toThrow("worktree contains modified files");
+    expect(saved.set.mock.calls.map(([value]) => value.state)).toEqual([
+      "removing",
+      "ready",
+    ]);
+  });
+
+  it("restores ready when cancellation happens as remove starts", async () => {
+    const controller = new AbortController();
+    const saved = store();
+    const delegate = git([
+      ...safePreviewOutputs(),
+      `${sha}\n`,
+      "",
+      listed(),
+      "/repo/.git\n",
+    ]);
+    const spawn = vi.fn(async (id: string, value: HostProcessOptions = {}) => {
+      const process = await delegate(id, value);
+      if (value.args?.includes("remove")) controller.abort();
+      return process;
+    });
+    await expect(
+      removeWorkspace(spawn, saved, binding.bindingId, sha, {
+        ...options,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/abort/i);
+    expect(saved.current().state).toBe("ready");
+  });
+
+  it("recovers a persisted removing state after restart", async () => {
+    const registered = store({ ...binding, state: "removing" });
+    await expect(
+      recoverWorkspaceRemoval(
+        git([listed(), "/repo/.git\n"]),
+        registered,
+        binding.bindingId,
+        binding.installId,
+      ),
+    ).resolves.toMatchObject({ state: "ready" });
+
+    const absent = store({ ...binding, state: "removing" });
+    await expect(
+      recoverWorkspaceRemoval(
+        git([`worktree /repo\0HEAD ${sha}\0branch refs/heads/main\0\0`]),
+        absent,
+        binding.bindingId,
+        binding.installId,
+      ),
+    ).resolves.toMatchObject({ state: "removed" });
+  });
+
+  it("keeps failed when the post-error worktree state cannot be reconciled", async () => {
+    const saved = store();
+    const spawn = git([
+      ...safePreviewOutputs(),
+      `${sha}\n`,
+      { code: 128, stderr: "fatal: unknown outcome\n" },
+      { code: 128, stderr: "fatal: repository unavailable\n" },
+    ]);
+    await expect(
+      removeWorkspace(spawn, saved, binding.bindingId, sha, options),
+    ).rejects.toThrow("unknown outcome");
     expect(saved.current().state).toBe("failed");
+  });
+
+  it("propagates aborts from the required usage inspection", async () => {
+    const controller = new AbortController();
+    await expect(
+      previewWorkspaceFinish(
+        git(safePreviewOutputs()),
+        store(),
+        binding.bindingId,
+        {
+          ...options,
+          signal: controller.signal,
+          inspectUse: async () => {
+            controller.abort();
+            throw new Error("interrupted probe");
+          },
+        },
+      ),
+    ).rejects.toThrow(/abort/i);
   });
 
   it("blocks ignored data and safely removes a real Git worktree without deleting its branch", async () => {
@@ -356,6 +444,18 @@ describe("safe worktree finish", () => {
         blockers: [expect.objectContaining({ kind: "ignored", count: 1 })],
       });
       await rm(join(path, ".env"));
+      const raced = join(path, "late.txt");
+      await expect(
+        removeWorkspace(realSpawn(), saved, actual.bindingId, head, {
+          ...options,
+          inspectUse: async () => {
+            await writeFile(raced, "late\n");
+            return { agents: [], terminals: [] };
+          },
+        }),
+      ).rejects.toThrow(/modified or untracked files/);
+      expect(saved.current().state).toBe("ready");
+      await rm(raced);
       await expect(
         removeWorkspace(realSpawn(), saved, actual.bindingId, head, options),
       ).resolves.toMatchObject({ state: "removed" });
