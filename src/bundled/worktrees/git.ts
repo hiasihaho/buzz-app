@@ -23,16 +23,18 @@ export async function runGit(
   repoPath: string,
   args: readonly string[],
   signal?: AbortSignal,
+  deadlineMs = DEADLINE_MS,
 ): Promise<string> {
   signal?.throwIfAborted();
-  if (!absolutePath(repoPath))
-    throw new GitError("Git path must be absolute", null, "");
+  if (!absolutePath(repoPath, nativePathStyle()))
+    throw new GitError("Git path must be absolute on this platform", null, "");
   let stdout = "";
   let stderr = "";
   let process: Awaited<ReturnType<Spawn>>;
   try {
     process = await spawn("git", {
-      args: ["-C", repoPath, ...args],
+      args: ["--no-optional-locks", "-C", repoPath, ...args],
+      env: { LC_ALL: "C" },
       onStdout: (data) => {
         stdout += data;
       },
@@ -45,7 +47,7 @@ export async function runGit(
       error instanceof Error ? error.message : String(error),
     );
   }
-  const timeout = AbortSignal.timeout(DEADLINE_MS);
+  const timeout = AbortSignal.timeout(deadlineMs);
   const abort = AbortSignal.any(signal ? [signal, timeout] : [timeout]);
   const stop = () => void process.kill();
   abort.addEventListener("abort", stop, { once: true });
@@ -212,8 +214,21 @@ export function assertPathWithinRoot(root: string, candidate: string): void {
     throw new Error("Worktree path must be inside the configured root");
 }
 
-function absolutePath(path: string): boolean {
-  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
+function nativePathStyle(): "posix" | "windows" {
+  return typeof navigator !== "undefined" &&
+    /Windows/i.test(navigator.userAgent)
+    ? "windows"
+    : "posix";
+}
+
+function absolutePath(path: string, style?: "posix" | "windows"): boolean {
+  if (path.includes("\0")) return false;
+  const windows = /^[A-Za-z]:[\\/]/.test(path);
+  return style === "windows"
+    ? windows
+    : style === "posix"
+      ? path.startsWith("/")
+      : path.startsWith("/") || windows;
 }
 
 function pathParts(path: string): {

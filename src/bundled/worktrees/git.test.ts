@@ -38,7 +38,15 @@ it("always runs git with -C and never uses cwd", async () => {
     runGit(spawn, "/repos/project", ["status", "--porcelain=v2", "-z"]),
   ).resolves.toBe("answer\n");
   expect(spawn).toHaveBeenCalledWith("git", {
-    args: ["-C", "/repos/project", "status", "--porcelain=v2", "-z"],
+    args: [
+      "--no-optional-locks",
+      "-C",
+      "/repos/project",
+      "status",
+      "--porcelain=v2",
+      "-z",
+    ],
+    env: { LC_ALL: "C" },
     onStdout: expect.any(Function),
     onStderr: expect.any(Function),
   });
@@ -71,6 +79,41 @@ it("reports spawn and git failures distinctly", async () => {
   await expect(runGit(spawn, "relative/repo", ["status"])).rejects.toThrow(
     "Git path must be absolute",
   );
+});
+
+it("rejects an already-aborted call before spawning", async () => {
+  const spawn = vi.fn();
+  const controller = new AbortController();
+  controller.abort();
+  await expect(
+    runGit(spawn, "/repo", ["status"], controller.signal),
+  ).rejects.toThrow();
+  expect(spawn).not.toHaveBeenCalled();
+});
+
+it("rejects Windows paths on POSIX", async () => {
+  const { spawn } = fakeSpawn("");
+  await expect(runGit(spawn, "C:/repo", ["status"])).rejects.toThrow(
+    "Git path must be absolute on this platform",
+  );
+  expect(spawn).not.toHaveBeenCalled();
+});
+
+it("stops git at its deadline", async () => {
+  let exit!: (code: number | null) => void;
+  const kill = vi.fn(async () => exit(null));
+  const spawn: NonNullable<Host["spawn"]> = vi.fn(async () => ({
+    write: async () => {},
+    end: async () => {},
+    kill,
+    exited: new Promise<number | null>((resolve) => {
+      exit = resolve;
+    }),
+  }));
+  await expect(
+    runGit(spawn, "/repo", ["status"], undefined, 1),
+  ).rejects.toThrow();
+  expect(kill).toHaveBeenCalledOnce();
 });
 
 it("stops git when the caller aborts", async () => {
