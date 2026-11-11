@@ -48,7 +48,8 @@ import { BrowserHostView } from "../../features/browser/BrowserHostView";
 import { BrowserSessions } from "../../features/browser/sessions";
 import type { BrowserPlatform } from "../../features/browser/platform";
 import { WorktreeDiffPanel } from "../worktrees/panel";
-import type { Worktrees } from "../worktrees/service";
+import type { WorktreeSummary, Worktrees } from "../worktrees/service";
+import type { WorkspaceFinishPreview } from "../worktrees/finish";
 
 const highlighted = vi.hoisted(() => ({
   root: undefined as string | undefined,
@@ -96,12 +97,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 async function page(
   type: "stream" | "solo" = "stream",
   navigator?: Navigation,
   routed = false,
   appComponent?: RegisteredPanel["component"],
   soloPreferences?: RelaySession["soloPreferences"],
+  worktrees?: Worktrees,
+  initialVisit = false,
 ) {
   const viewer = keypair(),
     authority = keypair();
@@ -221,45 +232,45 @@ async function page(
       };
     },
   };
-  const navigation: PageNavigation | undefined = root
-    ? {
-        entryId: "thread-visit",
-        target: {
-          version: 1,
-          kind: "conversation",
-          scope: {
-            viewer: viewer.pubkey,
-            communityOrigin: "https://relay.test",
+  const navigation: PageNavigation | undefined =
+    root || initialVisit
+      ? {
+          entryId: root ? "thread-visit" : "conversation:alpha",
+          target: {
+            version: 1,
+            kind: "conversation",
+            scope: {
+              viewer: viewer.pubkey,
+              communityOrigin: "https://relay.test",
+            },
+            channelId,
+            ...(root && { messageId: root.id, threadRootId: root.id }),
           },
-          channelId,
-          messageId: root.id,
-          threadRootId: root.id,
-        },
-        signal: new AbortController().signal,
-        position: () => undefined,
-        savePosition() {},
-        forSession() {
-          return this;
-        },
-        resolve: () => true,
-        complete: () => true,
-        passThrough: () => () => {},
-      }
-    : undefined;
-  const view = (navigation: PageNavigation | undefined) => (
+          signal: new AbortController().signal,
+          position: () => undefined,
+          savePosition() {},
+          forSession() {
+            return this;
+          },
+          resolve: () => true,
+          complete: () => true,
+          passThrough: () => () => {},
+        }
+      : undefined;
+  const pageNavigator =
+    navigator ?? createNavigationController(createMemoryHistory()).navigation;
+  const view = (nextNavigation = navigation) => (
     <ToastProvider>
       <ChannelsPage
         relay={relay}
         panels={panels}
-        navigator={
-          navigator ??
-          createNavigationController(createMemoryHistory()).navigation
-        }
-        navigation={navigation}
+        navigator={pageNavigator}
+        navigation={nextNavigation}
+        worktrees={worktrees}
       />
     </ToastProvider>
   );
-  const mounted = render(view(navigation));
+  const mounted = render(view());
   const user = userEvent.setup();
   const composer = await screen.findByRole("textbox", {
     name: type === "solo" ? "Message your agents" : "Message #Alpha",
@@ -267,10 +278,42 @@ async function page(
   });
   const open = () =>
     user.click(screen.getByRole("button", { name: "Open notes" }));
+  const visit = (nextChannelId: string) => {
+    const next = {
+      entryId: `conversation:${nextChannelId}`,
+      target: {
+        version: 1 as const,
+        kind: "conversation" as const,
+        scope: {
+          viewer: viewer.pubkey,
+          communityOrigin: "https://relay.test",
+        },
+        channelId: nextChannelId,
+      },
+      signal: new AbortController().signal,
+    };
+    if (navigation) Object.assign(navigation, next);
+    mounted.rerender(
+      view(
+        navigation ?? {
+          ...next,
+          position: () => undefined,
+          savePosition() {},
+          forSession() {
+            return this;
+          },
+          resolve: () => true,
+          complete: () => true,
+          passThrough: () => () => {},
+        },
+      ),
+    );
+  };
   return {
     user,
     composer,
     open,
+    visit,
     session: snapshot.session,
     scope,
     viewer: viewer.pubkey,
@@ -413,6 +456,93 @@ it.each([
     host.dispose();
   },
 );
+
+it("drops an open worktree finish preview when the main Solo chat changes", async () => {
+  const pending = deferred<WorkspaceFinishPreview>();
+  const head = "a".repeat(40);
+  const previewFinish = vi.fn<Worktrees["previewFinish"]>((channelId) =>
+    channelId === "alpha"
+      ? pending.promise
+      : Promise.resolve({
+          bindingId: `${channelId}-binding`,
+          path: `/trees/${channelId}`,
+          branch: `buzz/${channelId}`,
+          head,
+          blockers: [],
+        }),
+  );
+  const summary = (channelId: string): WorktreeSummary => ({
+    repository: "/repo",
+    path: `/trees/${channelId}`,
+    branch: `buzz/${channelId}`,
+    baseRef: "main",
+    baseSha: "b".repeat(40),
+    lifecycle: "ready",
+    status: {
+      state: "ready",
+      path: `/trees/${channelId}`,
+      branch: `buzz/${channelId}`,
+      detached: false,
+      dirty: false,
+      fileCount: 0,
+    },
+    unpublishedCommits: 0,
+  });
+  const worktrees: Worktrees = {
+    has: () => true,
+    canDiff: () => true,
+    summary: async (channelId) => summary(channelId),
+    diff: async (channelId) => ({
+      content: "",
+      path: `/trees/${channelId}`,
+      branch: `buzz/${channelId}`,
+      status: {
+        state: "ready",
+        path: `/trees/${channelId}`,
+        branch: `buzz/${channelId}`,
+        detached: false,
+        dirty: false,
+        fileCount: 0,
+      },
+    }),
+    workspace: () => undefined,
+    prepare: async () => undefined,
+    previewFinish,
+    remove: async () => {
+      throw new Error("not implemented");
+    },
+    recover: async () => {
+      throw new Error("not implemented");
+    },
+  };
+  const h = await page(
+    "solo",
+    undefined,
+    false,
+    undefined,
+    undefined,
+    worktrees,
+    true,
+  );
+  expect(await screen.findByText("buzz/alpha")).toBeVisible();
+  await h.user.click(screen.getByRole("button", { name: "Finish" }));
+  expect(previewFinish).toHaveBeenCalledWith("alpha", expect.any(Function));
+
+  await act(async () =>
+    pending.resolve({
+      bindingId: "alpha-binding",
+      path: "/trees/alpha",
+      branch: "buzz/alpha",
+      head,
+      blockers: [],
+    }),
+  );
+  expect(await screen.findByText("Remove local worktree?")).toBeVisible();
+
+  h.visit("gamma");
+  expect(await screen.findByText("buzz/gamma")).toBeVisible();
+  expect(screen.queryByText("Remove local worktree?")).not.toBeInTheDocument();
+});
 
 it("gives a chat-menu-opened local diff panel its originating chat context", async () => {
   const diff = vi.fn(async (channelId: string) => ({
