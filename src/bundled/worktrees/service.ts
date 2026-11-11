@@ -57,7 +57,7 @@ export function createWorktrees(
       const suffix = channelId.replaceAll("-", "").slice(0, 4).toLowerCase();
       const slug = taskSlug(task);
       const existing = bindings.forChannel(channelId);
-      const reusable = existing?.owned && existing.state !== "failed";
+      const reusable = existing?.owned === true;
       try {
         return await prepareWorkspace(
           desktop,

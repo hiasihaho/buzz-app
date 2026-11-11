@@ -31,6 +31,7 @@ function fixture(
     existing?: boolean;
     existingBranch?: boolean;
     branchSha?: string;
+    baseSha?: string;
     locked?: boolean;
     prunable?: boolean;
     resolvedWorktreePath?: string;
@@ -57,7 +58,7 @@ function fixture(
         gitArgs[0] === "rev-parse" &&
         gitArgs.at(-1)?.endsWith("^{commit}")
       )
-        stdout = `${"a".repeat(40)}\n`;
+        stdout = `${options.baseSha ?? "a".repeat(40)}\n`;
       else if (gitArgs[0] === "rev-parse") stdout = "/repo/.git\n";
       else if (gitArgs[0] === "worktree" && gitArgs[1] === "list")
         stdout = `worktree /repo\0HEAD ${"a".repeat(40)}\0branch refs/heads/main\0\0${
@@ -216,10 +217,16 @@ describe("prepareWorkspace", () => {
     store.set(failed);
     const replacement = { ...input, baseRef: "origin/develop" };
     await expect(
-      prepareWorkspace(fixture().host, store, replacement, options),
+      prepareWorkspace(
+        fixture({ baseSha: "b".repeat(40) }).host,
+        store,
+        replacement,
+        options,
+      ),
     ).resolves.toMatchObject({
       bindingId: failed.bindingId,
       baseRef: "origin/develop",
+      baseSha: "b".repeat(40),
       state: "ready",
     });
 
@@ -233,6 +240,35 @@ describe("prepareWorkspace", () => {
       ),
     ).rejects.toThrow("different workspace binding");
     expect(store.forChannel(input.channelId)).toEqual(failed);
+  });
+
+  it("never replaces a ready binding even when its worktree is unregistered", async () => {
+    const store = new BindingStore(memory());
+    const ready: WorkspaceBinding = {
+      bindingId: "binding-1",
+      channelId: input.channelId,
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task",
+      branch: input.branch,
+      baseRef: input.baseRef,
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 10,
+      installId: input.installId,
+      owned: true,
+      state: "ready",
+    };
+    store.set(ready);
+    await expect(
+      prepareWorkspace(
+        fixture().host,
+        store,
+        { ...input, baseRef: "origin/develop" },
+        options,
+      ),
+    ).rejects.toThrow("different workspace binding");
+    expect(store.forChannel(input.channelId)).toEqual(ready);
   });
 
   it("is idempotent after creating the intended worktree", async () => {

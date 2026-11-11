@@ -111,6 +111,15 @@ describe("worktree chat service", () => {
       branch: binding.branch,
       state: "ready",
     });
+    new BindingStore(saved).set({ ...binding, state: "failed" });
+    await expect(
+      service.prepare(binding.channelId, workspace, "Changed retry text"),
+    ).resolves.toMatchObject({
+      path: binding.path,
+      branch: binding.branch,
+      state: "ready",
+    });
+    new BindingStore(saved).set(binding);
     await expect(
       service.prepare(
         binding.channelId,
@@ -152,7 +161,7 @@ describe("worktree chat service", () => {
         else if (args.includes("worktree") && args.includes("list"))
           stdout = `worktree /repo\0HEAD ${"a".repeat(40)}\0branch refs/heads/main\0\0${
             added
-              ? `worktree /fixed-trees/fixed-workspace-abcd\0HEAD ${"a".repeat(40)}\0branch refs/heads/buzz/fixed-workspace-abcd\0\0`
+              ? `worktree /fixed-trees/original-abcd\0HEAD ${"a".repeat(40)}\0branch refs/heads/buzz/original-abcd\0\0`
               : ""
           }`;
         else if (args.includes("worktree") && args.includes("add"))
@@ -184,8 +193,8 @@ describe("worktree chat service", () => {
         "Fixed workspace",
       ),
     ).resolves.toMatchObject({
-      path: "/fixed-trees/fixed-workspace-abcd",
-      branch: "buzz/fixed-workspace-abcd",
+      path: "/fixed-trees/original-abcd",
+      branch: "buzz/original-abcd",
       baseRef: "develop",
       state: "ready",
     });
