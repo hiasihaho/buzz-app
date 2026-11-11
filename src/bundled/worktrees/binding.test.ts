@@ -38,8 +38,13 @@ it("round trips one binding per channel and id", () => {
     bindingId: "binding-2",
     branch: "buzz/new",
   };
-  store.set(replacement);
-  expect(store.all()).toEqual([replacement]);
+  expect(() => store.set(replacement)).toThrow(
+    "Owned workspace binding cannot be replaced",
+  );
+  expect(store.all()).toEqual([binding]);
+
+  store.set({ ...binding, state: "preparing" });
+  expect(store.all()).toEqual([{ ...binding, state: "preparing" }]);
 });
 
 it("ignores malformed, unsupported and unsafe saved records fail-closed", () => {
@@ -70,4 +75,20 @@ it("refuses to persist an invalid binding", () => {
   expect(() => store.set({ ...binding, path: "/outside" })).toThrow(
     "Invalid workspace binding",
   );
+});
+
+it("does not silently discard invalid stored records during a write", () => {
+  const storage = memory();
+  const store = new BindingStore(storage);
+  storage.setItem(
+    "buzz.worktrees.bindings.v1",
+    JSON.stringify({
+      version: 1,
+      bindings: [binding, { ...binding, path: "/outside" }],
+    }),
+  );
+  expect(() => store.set({ ...binding, state: "preparing" })).toThrow(
+    "Workspace binding store is invalid",
+  );
+  expect(store.all()).toEqual([binding]);
 });

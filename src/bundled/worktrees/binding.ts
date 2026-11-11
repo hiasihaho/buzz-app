@@ -47,9 +47,34 @@ export class BindingStore {
     return this.all().find((binding) => binding.channelId === channelId);
   }
 
+  private forWrite(): readonly WorkspaceBinding[] {
+    const raw = this.storage.getItem(STORAGE_KEY);
+    if (raw === null) return [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error("Workspace binding store is invalid");
+    }
+    if (!savedBindings(parsed) || !parsed.bindings.every(validBinding))
+      throw new Error("Workspace binding store is invalid");
+    return parsed.bindings;
+  }
+
   set(binding: WorkspaceBinding): void {
     if (!validBinding(binding)) throw new Error("Invalid workspace binding");
-    const bindings = this.all().filter(
+    const current = this.forWrite();
+    const conflictingOwned = current.find(
+      (saved) =>
+        saved.owned &&
+        ((saved.channelId === binding.channelId &&
+          saved.bindingId !== binding.bindingId) ||
+          (saved.bindingId === binding.bindingId &&
+            saved.channelId !== binding.channelId)),
+    );
+    if (conflictingOwned)
+      throw new Error("Owned workspace binding cannot be replaced");
+    const bindings = current.filter(
       (saved) =>
         saved.bindingId !== binding.bindingId &&
         saved.channelId !== binding.channelId,
