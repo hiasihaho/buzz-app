@@ -39,6 +39,7 @@ export function createWorktrees(
       if (!selected || !desktop) return undefined;
       const suffix = channelId.replaceAll("-", "").slice(0, 4).toLowerCase();
       const slug = taskSlug(task);
+      const existing = bindings.forChannel(channelId);
       return prepareWorkspace(
         desktop,
         bindings,
@@ -46,8 +47,14 @@ export function createWorktrees(
           channelId,
           repoRoot: selected.repository,
           worktreeRoot: selected.location,
-          worktreeName: `${slug}-${suffix}`,
-          branch: `buzz/${slug}-${suffix}`,
+          worktreeName:
+            existing?.owned === true
+              ? pathLeaf(existing.path)
+              : `${slug}-${suffix}`,
+          branch:
+            existing?.owned === true
+              ? existing.branch
+              : `buzz/${slug}-${suffix}`,
           baseRef: selected.baseBranch,
           installId: installId(storage),
         },
@@ -69,12 +76,22 @@ function workspace(value: Workspace): WorktreeWorkspace | undefined {
 function taskSlug(task: string): string {
   const slug = task
     .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40)
     .replace(/-+$/g, "");
   return slug || "work";
+}
+
+function pathLeaf(path: string): string {
+  const leaf = path
+    .replace(/[\\/]+$/, "")
+    .split(/[\\/]/)
+    .at(-1);
+  if (!leaf) throw new Error("Workspace binding path has no leaf");
+  return leaf;
 }
 
 function installId(storage: Storage): string {

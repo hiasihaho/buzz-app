@@ -81,6 +81,18 @@ import styles from "./Solo.module.css";
 
 /** Starting a new chat from a project starts it in that project, even when an
  * earlier draft there was switched to another one. */
+function configuredWorktree(
+  worktrees: Worktrees | undefined,
+  canvas: string | undefined,
+): WorktreeWorkspace | undefined {
+  if (!worktrees || !canvas?.includes('"worktree"')) return undefined;
+  try {
+    return worktrees.workspace(readWorkspace(canvas));
+  } catch {
+    return undefined;
+  }
+}
+
 function readDraftSettings(scope: string, draftKey: string) {
   const saved = readView<unknown>(scope, `${draftKey}:settings`, null);
   const settings = saved && typeof saved === "object" ? saved : {};
@@ -363,25 +375,51 @@ export function SoloDraft({
   // if that load failed or the saved defaults have changed since.
   const workspace = useRef<{
     id: string;
+    draftCanvas: string | undefined;
+    loadedCanvas: string | undefined;
     setup: ReturnType<typeof loadChatSetup>;
   }>(undefined);
   useEffect(() => {
     if (!selectedProject) {
+      workspace.current = undefined;
       setWorktreeWorkspace(undefined);
       return;
     }
-    if (workspace.current?.id === selectedProject) return;
+    const current = workspace.current;
+    if (current?.id === selectedProject) {
+      if (current.draftCanvas !== draftCanvas) {
+        current.draftCanvas = draftCanvas;
+        setWorktreeWorkspace(
+          configuredWorktree(worktrees, draftCanvas ?? current.loadedCanvas),
+        );
+      }
+      return;
+    }
+    setWorktreeWorkspace(undefined);
     const setup = loadChatSetup(session, selectedProject);
     setup.catch(() => {});
-    workspace.current = { id: selectedProject, setup };
+    workspace.current = {
+      id: selectedProject,
+      draftCanvas,
+      loadedCanvas: undefined,
+      setup,
+    };
     void setup
       .then((loaded) => {
         if (!mounted.current || workspace.current?.id !== selectedProject)
           return;
-        const value = loaded.canvas ? readWorkspace(loaded.canvas) : undefined;
-        setWorktreeWorkspace(value ? worktrees?.workspace(value) : undefined);
+        workspace.current.loadedCanvas = loaded.canvas;
+        setWorktreeWorkspace(
+          configuredWorktree(
+            worktrees,
+            workspace.current.draftCanvas ?? loaded.canvas,
+          ),
+        );
       })
-      .catch(() => {});
+      .catch(() => {
+        if (mounted.current && workspace.current?.id === selectedProject)
+          setWorktreeWorkspace(undefined);
+      });
   });
   const mounted = useRef(true);
   useEffect(() => {
@@ -530,11 +568,9 @@ export function SoloDraft({
           "This chat couldn't be saved on this device. Your draft is kept.",
         );
       const attached = files.snapshot();
-      const workspaceValue = setup?.canvas
-        ? readWorkspace(setup.canvas)
-        : undefined;
-      if (workspaceValue && worktrees?.workspace(workspaceValue))
-        await worktrees.prepare(channelId, workspaceValue, text);
+      const selectedWorktree = configuredWorktree(worktrees, setup?.canvas);
+      if (selectedWorktree && setup?.canvas)
+        await worktrees?.prepare(channelId, readWorkspace(setup.canvas), text);
       if (!mounted.current) return;
       // The chat lists at once, in its workspace, and its message goes out
       // behind the create, so the agents start on it without waiting for the
@@ -889,10 +925,10 @@ export function SoloDraft({
   const composer = (
     <div id="new-chat-prompt" ref={prompt}>
       {worktreeWorkspace && (
-        <p className={styles.workspace} role="status">
+        <p className={styles.workspace}>
           <strong>{worktreeWorkspace.repository}</strong>
-          <span>New worktree</span>
-          <span>from {worktreeWorkspace.baseBranch}</span>
+          <span>· New worktree</span>
+          <span>· from {worktreeWorkspace.baseBranch}</span>
         </p>
       )}
       <MessageComposer

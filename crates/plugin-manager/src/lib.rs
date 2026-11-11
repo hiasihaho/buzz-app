@@ -2807,10 +2807,11 @@ mod tests {
             .host_grants("block.builderlab", "wrong-revision")
             .is_err());
         assert!(manager.host_grants("unknown.plugin", "bundled").is_err());
-        assert_eq!(
-            manager.host_grants("buzz.channels", "bundled").unwrap(),
-            super::HostGrants::default()
-        );
+        let channels = manager.host_grants("buzz.channels", "bundled").unwrap();
+        assert!(channels.files);
+        assert_eq!(channels.processes.len(), 1);
+        assert_eq!(channels.processes[0].id, "git");
+        assert_eq!(channels.processes[0].program, "git");
 
         manager.change("disable", "block.builderlab").unwrap();
         let reopened = Manager::open(Some(temp.path().into()), "test", false).unwrap();

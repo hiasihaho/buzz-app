@@ -3,6 +3,15 @@
   "name": "Channels",
   "apiVersion": 1,
   "description": "Navigate channels and hold conversations in Buzz.",
+  "host": {
+    "files": true,
+    "processes": [
+      {
+        "id": "git",
+        "program": "git"
+      }
+    ]
+  },
   "discovery": {
     "category": "communication",
     "tags": ["Core", "Essentials", "messaging"]

@@ -3,6 +3,8 @@ import { ChannelCompletion } from "./ChannelCompletion";
 import { channelQuery } from "./channel-query";
 import { isChannelRoute } from "../../features/channel-navigation/routes";
 import type { PluginModule } from "../../plugins/api";
+import { isTauri } from "@tauri-apps/api/core";
+import { createWorktrees } from "../worktrees/service";
 import { ChannelsPage } from "./ChannelsPage";
 import { ConversationWorkspace, PageTabs } from "./PageTabs";
 import { registerCanvas } from "./canvas-panel";
@@ -27,9 +29,15 @@ export const inject = [
   "shortcuts",
   "communityReader",
   "adminAccess",
-  "worktrees",
+  "host",
 ];
 export const apply: PluginModule["apply"] = (ctx) => {
+  const spawn = ctx.host.spawn?.bind(ctx.host);
+  const resolveDirectory = ctx.host.resolveDirectory?.bind(ctx.host);
+  const worktrees =
+    isTauri() && spawn && resolveDirectory
+      ? createWorktrees({ spawn, resolveDirectory }, localStorage)
+      : undefined;
   registerCanvas(ctx);
   ctx.conversation.registerCompletion({
     id: "channel-typeahead",
@@ -157,7 +165,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         agents={agents}
         communities={ctx.communityReader}
         membership={membership}
-        worktrees={ctx.worktrees}
+        worktrees={worktrees}
       />
     ),
   });

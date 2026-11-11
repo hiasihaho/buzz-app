@@ -1362,7 +1362,7 @@ it("prepares a configured worktree before creating the Solo chat", async () => {
       onStarted={vi.fn()}
     />,
   );
-  expect(await screen.findByText("New worktree")).toBeInTheDocument();
+  expect(await screen.findByText("· New worktree")).toBeInTheDocument();
   const user = userEvent.setup();
   await user.type(screen.getByRole("textbox"), "Build this");
   await user.click(screen.getByRole("button", { name: "Send message" }));

@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
+import { isTauri } from "@tauri-apps/api/core";
 import { apply } from "./index";
 
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: vi.fn(() => false) }));
 vi.mock("./canvas-panel", () => ({ registerCanvas: () => {} }));
 
 afterEach(() => {
@@ -26,11 +28,46 @@ function registered() {
     agents: {},
     adminAccess: { membership: undefined },
     communityReader: {},
+    host: {},
   } as unknown as Parameters<typeof apply>[0]);
   return new Map(
     shortcuts.register.mock.calls.map(([shortcut]) => [shortcut.id, shortcut]),
   );
 }
+function worktreesFor(native: boolean) {
+  vi.mocked(isTauri).mockReturnValue(native);
+  const pages = { register: vi.fn() };
+  apply({
+    shortcuts: { register() {} },
+    conversation: {
+      registerCompletion() {},
+      registerTabs() {},
+      registerMessageAction() {},
+      chatMenus: {},
+    },
+    settingsCards: { register() {} },
+    pages,
+    navigation: {},
+    relay: {},
+    panels: {},
+    agents: {},
+    adminAccess: { membership: undefined },
+    communityReader: {},
+    host: {
+      spawn: vi.fn(),
+      resolveDirectory: vi.fn(),
+    },
+  } as unknown as Parameters<typeof apply>[0]);
+  const page = pages.register.mock.calls[0]?.[0];
+  const rendered = page.component({ companion: false, navigation: {} });
+  return rendered.props.worktrees;
+}
+
+it("wires worktree Git only on the installed desktop host", () => {
+  expect(worktreesFor(false)).toBeUndefined();
+  expect(worktreesFor(true)?.workspace).toBeTypeOf("function");
+});
+
 function sidebar(...rows: string[]) {
   document.body.innerHTML = `<nav aria-label="Subscribed channels">${rows
     .map(
