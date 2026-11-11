@@ -2,6 +2,8 @@ import type { Host } from "../../features/host/service";
 import { type Workspace, workspaceCanvas } from "../../features/solo/workspace";
 import { BindingStore, type WorkspaceBinding } from "./binding";
 import { prepareWorkspace, WorkspaceIntentConflict } from "./prepare";
+import { reconcileWorkspaceStatus, type WorkspaceStatus } from "./status";
+import { runGit } from "./git";
 
 const INSTALL_ID_KEY = "buzz.worktrees.install.v1";
 
@@ -11,7 +13,14 @@ export type WorktreeWorkspace = Readonly<{
   location: string;
 }>;
 
-export type Worktrees = Readonly<{
+export type WorktreeDiff = Readonly<{
+  content: string;
+  path: string;
+  branch: string;
+  status: WorkspaceStatus;
+}>;
+
+export type WorktreePreparation = Readonly<{
   workspace(value: Workspace): WorktreeWorkspace | undefined;
   prepare(
     channelId: string,
@@ -20,6 +29,12 @@ export type Worktrees = Readonly<{
     signal?: AbortSignal,
   ): Promise<WorkspaceBinding | undefined>;
 }>;
+
+export type Worktrees = WorktreePreparation &
+  Readonly<{
+    has(channelId: string): boolean;
+    diff(channelId: string, signal?: AbortSignal): Promise<WorktreeDiff>;
+  }>;
 
 /** Replaces create-time instructions with the worktree Buzz already prepared. */
 export function preparedWorkspaceCanvas(
@@ -48,6 +63,35 @@ export function createWorktrees(
       ? { spawn: host.spawn, resolveDirectory: host.resolveDirectory }
       : undefined;
   return {
+    has(channelId) {
+      const binding = bindings.forChannel(channelId);
+      return !!desktop && binding?.owned === true && binding.state === "ready";
+    },
+    async diff(channelId, signal) {
+      if (!desktop) throw new Error("Local Git is unavailable");
+      const binding = bindings.forChannel(channelId);
+      if (!binding?.owned || binding.state !== "ready")
+        throw new Error("This chat has no ready local worktree");
+      const status = await reconcileWorkspaceStatus(
+        desktop.spawn,
+        binding,
+        signal,
+      );
+      if (status.state !== "ready" || status.detached)
+        throw new Error(
+          status.reason ??
+            (status.detached
+              ? "The local worktree is detached"
+              : "The local worktree no longer matches this chat"),
+        );
+      const content = await runGit(
+        desktop.spawn,
+        binding.path,
+        ["diff", "--no-ext-diff", "--full-index", "HEAD", "--"],
+        signal,
+      );
+      return { content, path: binding.path, branch: binding.branch, status };
+    },
     workspace(value) {
       return desktop ? workspace(value) : undefined;
     },

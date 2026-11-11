@@ -62,6 +62,89 @@ describe("worktree chat service", () => {
     ).toEqual({ repository: "/repo", location: "/trees", baseBranch: "main" });
   });
 
+  it("reads a combined staged and unstaged diff only after reconciling the chat binding", async () => {
+    const saved = storage();
+    const binding: WorkspaceBinding = {
+      bindingId: "binding",
+      channelId: "channel",
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task",
+      branch: "buzz/task",
+      baseRef: "main",
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 1,
+      installId: "install",
+      owned: true,
+      state: "ready",
+    };
+    new BindingStore(saved).set(binding);
+    const patch = [
+      "diff --git a/file.txt b/file.txt",
+      `index ${"1".repeat(40)}..${"2".repeat(40)} 100644`,
+      "--- a/file.txt",
+      "+++ b/file.txt",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+      "",
+    ].join("\n");
+    const spawn: NonNullable<Host["spawn"]> = vi.fn(
+      async (_id, options = {}) => {
+        const args = options.args ?? [];
+        let stdout = "";
+        if (args.at(-1) === "version") stdout = "git version 2.43.0\n";
+        else if (args.includes("worktree"))
+          stdout = `worktree /repo\0HEAD ${"b".repeat(40)}\0branch refs/heads/main\0\0worktree /trees/task\0HEAD ${"a".repeat(40)}\0branch refs/heads/buzz/task\0\0`;
+        else if (args.at(-1) === "--git-common-dir") stdout = "/repo/.git\n";
+        else if (args.includes("--porcelain=v2"))
+          stdout = [
+            `# branch.oid ${"a".repeat(40)}`,
+            "# branch.head buzz/task",
+            `1 .M N... 100644 100644 100644 ${"1".repeat(40)} ${"2".repeat(40)} file.txt`,
+            "",
+          ].join("\0");
+        else if (args.includes("rev-list")) stdout = "0 0\n";
+        else if (args.includes("diff")) stdout = patch;
+        else throw new Error(`Unexpected git call: ${args.join(" ")}`);
+        options.onStdout?.(stdout);
+        return {
+          write: async () => {},
+          end: async () => {},
+          kill: async () => {},
+          exited: Promise.resolve(0),
+        };
+      },
+    );
+    const service = createWorktrees(
+      { spawn, resolveDirectory: async (path) => path },
+      saved,
+    );
+    expect(service.has(binding.channelId)).toBe(true);
+    await expect(service.diff(binding.channelId)).resolves.toMatchObject({
+      content: patch,
+      path: binding.path,
+      branch: binding.branch,
+      status: { state: "ready", dirty: true, fileCount: 1 },
+    });
+    expect(spawn).toHaveBeenLastCalledWith(
+      "git",
+      expect.objectContaining({
+        args: [
+          "--no-optional-locks",
+          "-C",
+          binding.path,
+          "diff",
+          "--no-ext-diff",
+          "--full-index",
+          "HEAD",
+          "--",
+        ],
+      }),
+    );
+  });
+
   it("reuses an owned binding when retry text changes", async () => {
     const saved = storage();
     saved.setItem("buzz.worktrees.install.v1", "install");

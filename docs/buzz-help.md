@@ -525,7 +525,10 @@ and are asked to sign in again in Buzz.
   prepares the worktree before creating the chat. The agent receives that
   prepared path and branch as its workspace instead of being asked to create
   another worktree. If preparation fails, the chat is not created and the draft
-  remains available to retry. In **New chat**, typing **#** lists your workspaces
+  remains available to retry. In a chat with a ready local worktree, choose
+  **Chat actions** → **View local changes** to inspect its tracked Git diff in
+  the side panel. Untracked files are counted but are not rendered as a patch.
+  In **New chat**, typing **#** lists your workspaces
   above channels; choosing one sets the composer's workspace control and leaves
   no text in the message. A plugin's chat, such as a Nexus task, shows the
   workspace control when its plugin files it; until that chat's first message,
@@ -541,6 +544,7 @@ and are asked to sign in again in Buzz.
   work in that folder for the rest of the conversation. A chip someone else
   sends, or a folder no longer in your repositories folder, grants nothing.
   A bare **!**, or **!** before a space, stays text.
+
 - **Activity** (the bell at the top of the Messages sidebar) collects DMs, ordinary responses in Solo chats, mentions of you, and
   replies in threads you started, replied in, or follow. Solo chats appear under All, not DMs; their nested
   threads stay separate. Agent-only coordination stays out. The tabs (All, Threads, Mentions, DMs, Reactions) narrow it by

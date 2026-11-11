@@ -67,7 +67,7 @@ import {
 import type { ConversationExtensions } from "../conversation/contracts";
 import {
   preparedWorkspaceCanvas,
-  type Worktrees,
+  type WorktreePreparation,
   type WorktreeWorkspace,
 } from "../../bundled/worktrees/service";
 import { usePassThroughUntilDrafted } from "../messages/draft-visit";
@@ -83,7 +83,7 @@ import styles from "./Solo.module.css";
 /** Starting a new chat from a project starts it in that project, even when an
  * earlier draft there was switched to another one. */
 function configuredWorktree(
-  worktrees: Worktrees | undefined,
+  worktrees: WorktreePreparation | undefined,
   canvas: string | undefined,
 ): WorktreeWorkspace | undefined {
   if (!worktrees || !canvas?.includes('"worktree"')) return undefined;
@@ -255,7 +255,7 @@ export function SoloDraft({
   agent?: string | undefined;
   focusRequest?: number | AbortSignal;
   extensions?: ConversationExtensions | undefined;
-  worktrees?: Worktrees | undefined;
+  worktrees?: WorktreePreparation | undefined;
   session: RelaySession;
   scope: string;
   onStarted: (id: string) => void;

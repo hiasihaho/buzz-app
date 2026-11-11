@@ -2,9 +2,11 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { isTauri } from "@tauri-apps/api/core";
 import { apply } from "./index";
+import { registerWorktreeDiff } from "../worktrees/panel";
 
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: vi.fn(() => false) }));
 vi.mock("./canvas-panel", () => ({ registerCanvas: () => {} }));
+vi.mock("../worktrees/panel", () => ({ registerWorktreeDiff: vi.fn() }));
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -63,9 +65,15 @@ function worktreesFor(native: boolean) {
   return rendered.props.worktrees;
 }
 
-it("wires worktree Git only on the installed desktop host", () => {
+it("wires worktree Git and its local diff panel only on the installed desktop host", () => {
   expect(worktreesFor(false)).toBeUndefined();
-  expect(worktreesFor(true)?.workspace).toBeTypeOf("function");
+  expect(registerWorktreeDiff).not.toHaveBeenCalled();
+  const worktrees = worktreesFor(true);
+  expect(worktrees?.workspace).toBeTypeOf("function");
+  expect(registerWorktreeDiff).toHaveBeenCalledWith(
+    expect.anything(),
+    worktrees,
+  );
 });
 
 function sidebar(...rows: string[]) {

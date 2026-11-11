@@ -5,6 +5,7 @@ import { isChannelRoute } from "../../features/channel-navigation/routes";
 import type { PluginModule } from "../../plugins/api";
 import { isTauri } from "@tauri-apps/api/core";
 import { createWorktrees } from "../worktrees/service";
+import { registerWorktreeDiff } from "../worktrees/panel";
 import { ChannelsPage } from "./ChannelsPage";
 import { ConversationWorkspace, PageTabs } from "./PageTabs";
 import { registerCanvas } from "./canvas-panel";
@@ -39,6 +40,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
       ? createWorktrees({ spawn, resolveDirectory }, localStorage)
       : undefined;
   registerCanvas(ctx);
+  if (worktrees) registerWorktreeDiff(ctx, worktrees);
   ctx.conversation.registerCompletion({
     id: "channel-typeahead",
     title: "Channel",
