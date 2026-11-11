@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Host } from "../../features/host/service";
 import { BindingStore, type WorkspaceBinding } from "./binding";
-import { createWorktrees } from "./service";
+import { createWorktrees, preparedWorkspaceCanvas } from "./service";
 import type { Workspace } from "../../features/solo/workspace";
 
 const workspace: Workspace = {
@@ -21,6 +21,34 @@ function storage(): Storage {
 }
 
 describe("worktree chat service", () => {
+  it("hands the prepared path and branch to the agent as facts", () => {
+    const binding: WorkspaceBinding = {
+      bindingId: "binding",
+      channelId: "channel",
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task-abcd",
+      branch: "buzz/task-abcd",
+      baseRef: "main",
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 1,
+      installId: "install",
+      owned: true,
+      state: "ready",
+    };
+    const canvas = preparedWorkspaceCanvas(
+      { ...workspace, canvas: "Keep this instruction." },
+      binding,
+    );
+    expect(canvas).toContain(
+      "Work in `/trees/task-abcd` on branch `buzz/task-abcd`",
+    );
+    expect(canvas).toContain("already exists from `main`");
+    expect(canvas).toContain("do not create another worktree");
+    expect(canvas).not.toContain("Before starting new work");
+    expect(canvas).toContain("Keep this instruction.");
+  });
   it("exposes one configured repository only when desktop Git is available", () => {
     expect(createWorktrees({}, storage()).workspace(workspace)).toBeUndefined();
     expect(
@@ -83,6 +111,18 @@ describe("worktree chat service", () => {
       branch: binding.branch,
       state: "ready",
     });
+    await expect(
+      service.prepare(
+        binding.channelId,
+        {
+          ...workspace,
+          worktree: { location: "/trees", baseBranch: "develop" },
+        },
+        "Changed workspace",
+      ),
+    ).rejects.toThrow(
+      "Switch back to its original workspace to retry, or open a new draft",
+    );
   });
 
   it("does not claim a multi-folder workspace can be prepared", () => {

@@ -1304,11 +1304,81 @@ it("edits draft settings before creation, restores them, and applies Canvas once
   expect(order).toEqual(["send", "canvas"]);
 });
 
+it("shows and clears a draft-only worktree without a project", async () => {
+  const canvas = workspaceCanvas({
+    folders: ["/repo"],
+    worktree: { location: "/trees", baseBranch: "main" },
+    canvas: "Draft override",
+  });
+  writeView("test", "solo:settings", { canvas });
+  const worktrees = {
+    workspace: vi.fn(() => ({
+      repository: "/repo",
+      location: "/trees",
+      baseBranch: "main",
+    })),
+    prepare: vi.fn(async () => undefined),
+  };
+  render(
+    <SoloDraft
+      session={setup().session}
+      scope="test"
+      worktrees={worktrees}
+      onStarted={vi.fn()}
+    />,
+  );
+  expect(await screen.findByText("· New worktree")).toBeInTheDocument();
+  expect(worktrees.workspace).toHaveBeenCalledWith(
+    expect.objectContaining({ canvas: "Draft override" }),
+  );
+
+  writeView("test", "solo:settings", {
+    canvas: workspaceCanvas({ folders: ["/repo"], canvas: "No worktree" }),
+  });
+  await waitFor(() =>
+    expect(screen.queryByText("· New worktree")).not.toBeInTheDocument(),
+  );
+});
+
+it("ignores a hand-edited managed block without worktree mode", () => {
+  writeView("test", "solo:settings", {
+    canvas: workspaceCanvas({ folders: ["/repo"], canvas: "Notes" }).replace(
+      "- `/repo`",
+      "- `/review-only`",
+    ),
+  });
+  const workspace = vi.fn();
+  render(
+    <SoloDraft
+      session={setup().session}
+      scope="test"
+      worktrees={{ workspace, prepare: vi.fn(async () => undefined) }}
+      onStarted={vi.fn()}
+    />,
+  );
+  expect(screen.queryByText("· New worktree")).not.toBeInTheDocument();
+  expect(workspace).not.toHaveBeenCalled();
+});
+
 it("prepares a configured worktree before creating the Solo chat", async () => {
   vi.stubGlobal("crypto", webcrypto);
   const f = setup();
   const id = await projectTemplateId("work");
-  const prepare = vi.fn(async () => undefined);
+  const prepare = vi.fn(async (channelId: string) => ({
+    bindingId: "binding",
+    channelId,
+    repoRoot: "/repo",
+    worktreeRoot: "/trees",
+    path: "/trees/build-this-abcd",
+    branch: "buzz/build-this-abcd",
+    baseRef: "main",
+    baseSha: "a".repeat(40),
+    gitCommonDir: "/repo/.git",
+    createdAt: 1,
+    installId: "install",
+    owned: true as const,
+    state: "ready" as const,
+  }));
   const value = {
     folders: ["/repo"],
     worktree: { location: "/trees", baseBranch: "main" },
@@ -1367,6 +1437,12 @@ it("prepares a configured worktree before creating the Solo chat", async () => {
   await user.type(screen.getByRole("textbox"), "Build this");
   await user.click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+  expect(prepare).toHaveBeenCalledWith(expect.any(String), value, "Build this");
+  const startedCanvas = f.channelWrites.start.mock.calls[0]?.[5]?.canvas;
+  expect(startedCanvas).toContain(
+    "Work in `/trees/build-this-abcd` on branch `buzz/build-this-abcd`",
+  );
+  expect(startedCanvas).not.toContain("create a new worktree");
   expect(f.channelWrites.create).toHaveBeenCalledOnce();
   expect(prepare.mock.invocationCallOrder[0]).toBeLessThan(
     f.channelWrites.create.mock.invocationCallOrder[0] as number,

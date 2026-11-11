@@ -1,5 +1,5 @@
 import type { Host } from "../../features/host/service";
-import type { Workspace } from "../../features/solo/workspace";
+import { type Workspace, workspaceCanvas } from "../../features/solo/workspace";
 import { BindingStore, type WorkspaceBinding } from "./binding";
 import { prepareWorkspace } from "./prepare";
 
@@ -21,6 +21,22 @@ export type Worktrees = Readonly<{
   ): Promise<WorkspaceBinding | undefined>;
 }>;
 
+/** Replaces create-time instructions with the worktree Buzz already prepared. */
+export function preparedWorkspaceCanvas(
+  value: Workspace,
+  binding: WorkspaceBinding,
+): string {
+  const instructions = [
+    "## Prepared worktree",
+    "",
+    `- Work in \`${binding.path}\` on branch \`${binding.branch}\`.`,
+    `- The worktree already exists from \`${binding.baseRef}\` at \`${binding.baseSha}\`; do not create another worktree.`,
+    "",
+    value.canvas,
+  ].join("\n");
+  return workspaceCanvas({ folders: [binding.path], canvas: instructions });
+}
+
 export function createWorktrees(
   host: Pick<Host, "spawn" | "resolveDirectory">,
   storage: Storage,
@@ -40,26 +56,38 @@ export function createWorktrees(
       const suffix = channelId.replaceAll("-", "").slice(0, 4).toLowerCase();
       const slug = taskSlug(task);
       const existing = bindings.forChannel(channelId);
-      return prepareWorkspace(
-        desktop,
-        bindings,
-        {
-          channelId,
-          repoRoot: selected.repository,
-          worktreeRoot: selected.location,
-          worktreeName:
-            existing?.owned === true
-              ? pathLeaf(existing.path)
-              : `${slug}-${suffix}`,
-          branch:
-            existing?.owned === true
-              ? existing.branch
-              : `buzz/${slug}-${suffix}`,
-          baseRef: selected.baseBranch,
-          installId: installId(storage),
-        },
-        signal ? { signal } : {},
-      );
+      try {
+        return await prepareWorkspace(
+          desktop,
+          bindings,
+          {
+            channelId,
+            repoRoot: selected.repository,
+            worktreeRoot: selected.location,
+            worktreeName:
+              existing?.owned === true
+                ? pathLeaf(existing.path)
+                : `${slug}-${suffix}`,
+            branch:
+              existing?.owned === true
+                ? existing.branch
+                : `buzz/${slug}-${suffix}`,
+            baseRef: selected.baseBranch,
+            installId: installId(storage),
+          },
+          signal ? { signal } : {},
+        );
+      } catch (error) {
+        if (
+          existing?.owned &&
+          error instanceof Error &&
+          error.message === "Channel already owns a different workspace binding"
+        )
+          throw new Error(
+            `This draft already prepared ${existing.path} on ${existing.branch}. Switch back to its original workspace to retry, or open a new draft for a different workspace.`,
+          );
+        throw error;
+      }
     },
   };
 }

@@ -65,9 +65,10 @@ import {
   type AttachmentDraft,
 } from "../messages/attachment-draft";
 import type { ConversationExtensions } from "../conversation/contracts";
-import type {
-  Worktrees,
-  WorktreeWorkspace,
+import {
+  preparedWorkspaceCanvas,
+  type Worktrees,
+  type WorktreeWorkspace,
 } from "../../bundled/worktrees/service";
 import { usePassThroughUntilDrafted } from "../messages/draft-visit";
 import type { PageNavigation } from "../navigation/service";
@@ -91,6 +92,29 @@ function configuredWorktree(
   } catch {
     return undefined;
   }
+}
+
+function sameConfiguredWorktree(
+  left: WorktreeWorkspace | undefined,
+  right: WorktreeWorkspace | undefined,
+): boolean {
+  return (
+    left === right ||
+    (!!left &&
+      !!right &&
+      left.repository === right.repository &&
+      left.location === right.location &&
+      left.baseBranch === right.baseBranch)
+  );
+}
+
+function worktreeTask(draft: MentionDraft): string {
+  let task = draft.text;
+  for (const { start, end } of [...draft.recipients].sort(
+    (a, b) => b.start - a.start,
+  ))
+    task = task.slice(0, start) + task.slice(end);
+  return task.trim();
 }
 
 function readDraftSettings(scope: string, draftKey: string) {
@@ -382,7 +406,10 @@ export function SoloDraft({
   useEffect(() => {
     if (!selectedProject) {
       workspace.current = undefined;
-      setWorktreeWorkspace(undefined);
+      const configured = configuredWorktree(worktrees, draftCanvas);
+      setWorktreeWorkspace((current) =>
+        sameConfiguredWorktree(current, configured) ? current : configured,
+      );
       return;
     }
     const current = workspace.current;
@@ -569,8 +596,19 @@ export function SoloDraft({
         );
       const attached = files.snapshot();
       const selectedWorktree = configuredWorktree(worktrees, setup?.canvas);
-      if (selectedWorktree && setup?.canvas)
-        await worktrees?.prepare(channelId, readWorkspace(setup.canvas), text);
+      if (selectedWorktree && setup?.canvas) {
+        const sourceWorkspace = readWorkspace(setup.canvas);
+        const binding = await worktrees?.prepare(
+          channelId,
+          sourceWorkspace,
+          worktreeTask(draft),
+        );
+        if (binding)
+          setup = {
+            ...setup,
+            canvas: preparedWorkspaceCanvas(sourceWorkspace, binding),
+          };
+      }
       if (!mounted.current) return;
       // The chat lists at once, in its workspace, and its message goes out
       // behind the create, so the agents start on it without waiting for the
