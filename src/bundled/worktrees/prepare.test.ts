@@ -21,9 +21,16 @@ const input = {
   installId: "install-1",
 };
 
-function fixture(options: { addFails?: boolean; existing?: boolean } = {}) {
+function fixture(
+  options: {
+    addFails?: boolean;
+    existing?: boolean;
+    existingBranch?: boolean;
+  } = {},
+) {
   const calls: string[][] = [];
   let added = options.existing ?? false;
+  let branchExists = options.existingBranch ?? added;
   const spawn: NonNullable<Host["spawn"]> = vi.fn(
     async (_id: string, processOptions: HostProcessOptions = {}) => {
       const args = [...(processOptions.args ?? [])];
@@ -45,7 +52,10 @@ function fixture(options: { addFails?: boolean; existing?: boolean } = {}) {
         if (options.addFails) {
           stderr = "add failed";
           code = 1;
-        } else added = true;
+        } else {
+          added = true;
+          branchExists = true;
+        }
       } else if (
         gitArgs[0] === "check-ref-format" ||
         (gitArgs[0] === "rev-parse" &&
@@ -56,7 +66,7 @@ function fixture(options: { addFails?: boolean; existing?: boolean } = {}) {
       if (
         gitArgs[0] === "rev-parse" &&
         gitArgs.includes("refs/heads/buzz/task^{commit}") &&
-        !added
+        !branchExists
       ) {
         stderr = "unknown revision";
         code = 128;
@@ -117,15 +127,35 @@ describe("prepareWorkspace", () => {
     ]);
   });
 
-  it("is idempotent when the intended worktree already exists", async () => {
-    const { host, calls } = fixture({ existing: true });
+  it("is idempotent after creating the intended worktree", async () => {
+    const { host, calls } = fixture();
     const store = new BindingStore(memory());
     const first = await prepareWorkspace(host, store, input, options);
     const second = await prepareWorkspace(host, store, input, options);
     expect(second).toEqual(first);
     expect(
       calls.filter((args) => args[0] === "worktree" && args[1] === "add"),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
+  });
+
+  it("rejects an existing worktree without an owned binding", async () => {
+    const { host } = fixture({ existing: true });
+    const store = new BindingStore(memory());
+    await expect(prepareWorkspace(host, store, input, options)).rejects.toThrow(
+      "already registered as a worktree",
+    );
+    expect(store.forChannel(input.channelId)).toBeUndefined();
+  });
+
+  it("checks out an existing branch by its short name", async () => {
+    const { host, calls } = fixture({ existingBranch: true });
+    await prepareWorkspace(host, new BindingStore(memory()), input, options);
+    expect(calls).toContainEqual([
+      "worktree",
+      "add",
+      "/trees/task",
+      "buzz/task",
+    ]);
   });
 
   it("records failed and rethrows when creation fails", async () => {
@@ -138,7 +168,7 @@ describe("prepareWorkspace", () => {
   });
 
   it("resumes against the saved SHA even when the base ref advances", async () => {
-    const { host, calls } = fixture({ existing: true });
+    const { host, calls } = fixture();
     const store = new BindingStore(memory());
     await prepareWorkspace(host, store, input, options);
     await prepareWorkspace(host, store, input, options);
@@ -148,7 +178,7 @@ describe("prepareWorkspace", () => {
   });
 
   it("does not displace a different owned binding", async () => {
-    const { host } = fixture({ existing: true });
+    const { host } = fixture();
     const store = new BindingStore(memory());
     await prepareWorkspace(host, store, input, options);
     await expect(

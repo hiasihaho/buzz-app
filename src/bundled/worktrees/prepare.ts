@@ -100,6 +100,8 @@ export async function prepareWorkspace(
     owned: true,
     state: "preparing",
   };
+  if (!existing?.owned && (await findWorktree(host, preparing, options.signal)))
+    throw new Error("Workspace path is already registered as a worktree");
   bindings.set(preparing);
 
   try {
@@ -149,7 +151,7 @@ async function ensureWorktree(
       throw new Error("Workspace branch already exists at a different commit");
 
     const addArgs = branchSha
-      ? ["worktree", "add", binding.path, branchRef]
+      ? ["worktree", "add", binding.path, binding.branch]
       : [
           "worktree",
           "add",

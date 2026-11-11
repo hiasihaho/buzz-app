@@ -47,6 +47,19 @@ it("round trips one binding per channel and id", () => {
   expect(store.all()).toEqual([{ ...binding, state: "preparing" }]);
 });
 
+it("refuses a second owned binding for the same path", () => {
+  const store = new BindingStore(memory());
+  store.set(binding);
+  expect(() =>
+    store.set({
+      ...binding,
+      bindingId: "binding-2",
+      channelId: "channel-2",
+    }),
+  ).toThrow("Owned workspace binding cannot be replaced");
+  expect(store.all()).toEqual([binding]);
+});
+
 it("ignores malformed, unsupported and unsafe saved records fail-closed", () => {
   const storage = memory();
   const store = new BindingStore(storage);

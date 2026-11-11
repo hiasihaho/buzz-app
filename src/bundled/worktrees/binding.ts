@@ -70,7 +70,10 @@ export class BindingStore {
         ((saved.channelId === binding.channelId &&
           saved.bindingId !== binding.bindingId) ||
           (saved.bindingId === binding.bindingId &&
-            saved.channelId !== binding.channelId)),
+            saved.channelId !== binding.channelId) ||
+          (binding.owned &&
+            saved.bindingId !== binding.bindingId &&
+            samePath(saved.path, binding.path))),
     );
     if (conflictingOwned)
       throw new Error("Owned workspace binding cannot be replaced");
@@ -155,6 +158,15 @@ function validRef(value: string): boolean {
     !value.endsWith(".") &&
     !value.endsWith(".lock")
   );
+}
+
+function samePath(left: string, right: string): boolean {
+  const windows = /^[A-Za-z]:[\\/]/.test(left) && /^[A-Za-z]:[\\/]/.test(right);
+  const normalize = (value: string) =>
+    value.replace(/[\\/]+$/, "").replaceAll("\\", "/");
+  return windows
+    ? normalize(left).toLowerCase() === normalize(right).toLowerCase()
+    : normalize(left) === normalize(right);
 }
 
 function object(value: unknown): value is Record<string, unknown> {
