@@ -444,7 +444,7 @@ describe("safe worktree finish", () => {
     expect(saved.set).not.toHaveBeenCalled();
   });
 
-  it("keeps failed when the post-error worktree state cannot be reconciled", async () => {
+  it("keeps an unknown post-error worktree state retryable", async () => {
     const saved = store();
     const spawn = git([
       ...safePreviewOutputs(),
@@ -455,7 +455,7 @@ describe("safe worktree finish", () => {
     await expect(
       removeWorkspace(spawn, saved, binding.bindingId, sha, options),
     ).rejects.toThrow("unknown outcome");
-    expect(saved.current().state).toBe("failed");
+    expect(saved.current().state).toBe("removing");
   });
 
   it("propagates aborts from the required usage inspection", async () => {

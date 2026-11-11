@@ -258,7 +258,7 @@ export async function removeWorkspace(
     }
     bindings.set({
       ...binding,
-      state: recovered === "ready" ? "ready" : "failed",
+      state: recovered === "ready" ? "ready" : "removing",
     });
     throw error;
   }
