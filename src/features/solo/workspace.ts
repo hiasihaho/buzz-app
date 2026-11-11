@@ -105,7 +105,7 @@ export function readWorkspace(content: string): Workspace {
     canvas.replace(worktreeRule, earlierWorktreeRule) !== content
   )
     throw new Error(
-      "Workspace instructions were edited in Canvas. Use the raw Canvas editor to preserve those changes.",
+      "Workspace instructions were edited in Canvas. Restore the generated workspace instructions, or turn off worktree mode before starting the chat.",
     );
   return value;
 }
@@ -124,10 +124,34 @@ export function workspaceDirectories(content: string): string[] {
   }
 }
 
+export function hasManagedWorktree(content: string): boolean {
+  if (!content.startsWith(prefix)) return false;
+  return !!parseWorkspaceMetadata(content).worktree;
+}
+
 function parseWorkspace(content: string): Workspace {
-  const lineEnd = content.indexOf(" -->\n");
+  const { lineEnd, folders, worktree } = parseWorkspaceMetadata(content);
   const blockEnd = content.indexOf(`\n${end}\n\n`, lineEnd);
-  if (lineEnd < 0 || blockEnd < 0)
+  if (blockEnd < 0)
+    throw new Error(
+      "Workspace metadata is incomplete. Edit the raw Canvas before changing workspace settings.",
+    );
+  return validateWorkspace({
+    folders,
+    ...(worktree
+      ? { worktree: worktree as { location: string; baseBranch: string } }
+      : {}),
+    canvas: content.slice(blockEnd + end.length + 3),
+  });
+}
+
+function parseWorkspaceMetadata(content: string): {
+  lineEnd: number;
+  folders: string[];
+  worktree?: { location: string; baseBranch: string } | undefined;
+} {
+  const lineEnd = content.indexOf(" -->\n");
+  if (lineEnd < 0)
     throw new Error(
       "Workspace metadata is incomplete. Edit the raw Canvas before changing workspace settings.",
     );
@@ -144,7 +168,7 @@ function parseWorkspace(content: string): Workspace {
     typeof raw !== "object" ||
     !("folders" in raw) ||
     !Array.isArray(raw.folders) ||
-    raw.folders.some((v) => typeof v !== "string")
+    raw.folders.some((value) => typeof value !== "string")
   )
     throw new Error("Invalid workspace folders.");
   const worktree = "worktree" in raw ? raw.worktree : undefined;
@@ -158,13 +182,13 @@ function parseWorkspace(content: string): Workspace {
       typeof worktree.baseBranch !== "string")
   )
     throw new Error("Invalid worktree settings.");
-  return validateWorkspace({
+  return {
+    lineEnd,
     folders: raw.folders,
     ...(worktree
       ? { worktree: worktree as { location: string; baseBranch: string } }
       : {}),
-    canvas: content.slice(blockEnd + end.length + 3),
-  });
+  };
 }
 
 /** One existing encrypted template record per project. */

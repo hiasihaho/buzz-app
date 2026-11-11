@@ -13,6 +13,7 @@ import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { GearIcon } from "../../shared/design-system/icons";
 import {
   defaultsRevision,
+  hasManagedWorktree,
   loadChatSetup,
   parseChatSetup,
   readWorkspace,
@@ -582,7 +583,7 @@ export function SoloDraft({
       // gate. Preview rendering is deliberately tolerant, but starting a chat
       // must not silently discard a malformed worktree configuration.
       const sourceWorkspace =
-        worktrees && setup?.canvas.includes('"worktree"')
+        worktrees && setup?.canvas && hasManagedWorktree(setup.canvas)
           ? readWorkspace(setup.canvas)
           : undefined;
       const selectedWorktree = sourceWorkspace

@@ -1468,24 +1468,31 @@ it("clears a draft worktree line when project defaults fail to load", async () =
   );
 });
 
-it("ignores a hand-edited managed block without worktree mode", () => {
+it("starts with a hand-edited folder block when Canvas prose names worktree", async () => {
+  const f = setup();
   writeView("test", "solo:settings", {
-    canvas: workspaceCanvas({ folders: ["/repo"], canvas: "Notes" }).replace(
-      "- `/repo`",
-      "- `/review-only`",
-    ),
+    canvas: workspaceCanvas({
+      folders: ["/repo"],
+      canvas: 'Discuss "worktree" behavior.',
+    }).replace("- `/repo`", "- `/review-only`"),
   });
   const workspace = vi.fn();
+  const prepare = vi.fn(async () => undefined);
   render(
     <SoloDraft
-      session={setup().session}
+      session={f.session}
       scope="test"
-      worktrees={{ workspace, prepare: vi.fn(async () => undefined) }}
+      worktrees={{ workspace, prepare }}
       onStarted={vi.fn()}
     />,
   );
   expect(screen.queryByText("· New worktree")).not.toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.type(screen.getByRole("textbox"), "Start safely");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(f.channelWrites.create).toHaveBeenCalledOnce());
   expect(workspace).not.toHaveBeenCalled();
+  expect(prepare).not.toHaveBeenCalled();
 });
 
 it("refuses to start with malformed managed metadata in worktree mode", async () => {
@@ -1494,7 +1501,7 @@ it("refuses to start with malformed managed metadata in worktree mode", async ()
     folders: ["/repo"],
     worktree: { location: "/trees", baseBranch: "main" },
     canvas: "Keep this task",
-  }).replace('"baseBranch":"main"', '"baseBranch":');
+  }).replace('"worktree":', '"worktree:');
   const prepare = vi.fn();
   writeView("test", "solo:settings", { canvas: malformed });
   render(
@@ -1520,6 +1527,40 @@ it("refuses to start with malformed managed metadata in worktree mode", async ()
     "Workspace metadata is invalid",
   );
   expect(input).toHaveTextContent("Do not lose me");
+  expect(prepare).not.toHaveBeenCalled();
+  expect(f.channelWrites.create).not.toHaveBeenCalled();
+});
+
+it("refuses hand-edited instructions in worktree mode with recovery guidance", async () => {
+  const f = setup();
+  const edited = workspaceCanvas({
+    folders: ["/repo"],
+    worktree: { location: "/trees", baseBranch: "main" },
+    canvas: "Keep this task",
+  }).replace("for review only", "for edits");
+  const prepare = vi.fn();
+  writeView("test", "solo:settings", { canvas: edited });
+  render(
+    <SoloDraft
+      session={f.session}
+      scope="test"
+      worktrees={{
+        workspace: vi.fn(() => ({
+          repository: "/repo",
+          location: "/trees",
+          baseBranch: "main",
+        })),
+        prepare,
+      }}
+      onStarted={vi.fn()}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.type(screen.getByRole("textbox"), "Keep me");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Restore the generated workspace instructions, or turn off worktree mode",
+  );
   expect(prepare).not.toHaveBeenCalled();
   expect(f.channelWrites.create).not.toHaveBeenCalled();
 });
