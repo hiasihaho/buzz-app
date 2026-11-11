@@ -15,6 +15,7 @@ import {
   defaultsRevision,
   loadChatSetup,
   parseChatSetup,
+  readWorkspace,
   type ChatSetup,
 } from "./workspace";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -64,6 +65,10 @@ import {
   type AttachmentDraft,
 } from "../messages/attachment-draft";
 import type { ConversationExtensions } from "../conversation/contracts";
+import type {
+  Worktrees,
+  WorktreeWorkspace,
+} from "../../bundled/worktrees/service";
 import { usePassThroughUntilDrafted } from "../messages/draft-visit";
 import type { PageNavigation } from "../navigation/service";
 import {
@@ -201,6 +206,7 @@ export function SoloDraft({
   visit,
   region,
   draft: regionDraft,
+  worktrees,
 }: {
   draft?: SoloDraftStart["draft"];
   /** The Solo region whose source opened this draft; its chat gets that label. */
@@ -213,6 +219,7 @@ export function SoloDraft({
   agent?: string | undefined;
   focusRequest?: number | AbortSignal;
   extensions?: ConversationExtensions | undefined;
+  worktrees?: Worktrees | undefined;
   session: RelaySession;
   scope: string;
   onStarted: (id: string) => void;
@@ -348,6 +355,8 @@ export function SoloDraft({
   }, [session, channelId]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [worktreeWorkspace, setWorktreeWorkspace] =
+    useState<WorktreeWorkspace>();
   const submitting = useRef(false);
   // A workspace's defaults load as soon as it is picked, so starting a chat
   // in it does not wait for them. A start uses them up, or loads them again
@@ -357,10 +366,22 @@ export function SoloDraft({
     setup: ReturnType<typeof loadChatSetup>;
   }>(undefined);
   useEffect(() => {
-    if (!selectedProject || workspace.current?.id === selectedProject) return;
+    if (!selectedProject) {
+      setWorktreeWorkspace(undefined);
+      return;
+    }
+    if (workspace.current?.id === selectedProject) return;
     const setup = loadChatSetup(session, selectedProject);
     setup.catch(() => {});
     workspace.current = { id: selectedProject, setup };
+    void setup
+      .then((loaded) => {
+        if (!mounted.current || workspace.current?.id !== selectedProject)
+          return;
+        const value = loaded.canvas ? readWorkspace(loaded.canvas) : undefined;
+        setWorktreeWorkspace(value ? worktrees?.workspace(value) : undefined);
+      })
+      .catch(() => {});
   });
   const mounted = useRef(true);
   useEffect(() => {
@@ -509,6 +530,12 @@ export function SoloDraft({
           "This chat couldn't be saved on this device. Your draft is kept.",
         );
       const attached = files.snapshot();
+      const workspaceValue = setup?.canvas
+        ? readWorkspace(setup.canvas)
+        : undefined;
+      if (workspaceValue && worktrees?.workspace(workspaceValue))
+        await worktrees.prepare(channelId, workspaceValue, text);
+      if (!mounted.current) return;
       // The chat lists at once, in its workspace, and its message goes out
       // behind the create, so the agents start on it without waiting for the
       // relay. Its Canvas is saved once the chat exists; until then local
@@ -861,6 +888,13 @@ export function SoloDraft({
   };
   const composer = (
     <div id="new-chat-prompt" ref={prompt}>
+      {worktreeWorkspace && (
+        <p className={styles.workspace} role="status">
+          <strong>{worktreeWorkspace.repository}</strong>
+          <span>New worktree</span>
+          <span>from {worktreeWorkspace.baseBranch}</span>
+        </p>
+      )}
       <MessageComposer
         key={restored.count}
         focusRequest={restored.focus ? restored.count : 0}

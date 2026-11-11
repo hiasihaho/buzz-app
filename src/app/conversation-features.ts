@@ -5,10 +5,13 @@ import mentionsManifest from "../bundled/mentions/manifest.json";
 import * as mentions from "../bundled/mentions";
 import { PLUGIN_REQUEST_REVIEWER } from "../plugins/review-access";
 import * as pluginRequests from "./plugin-request-feature";
+import worktreesManifest from "../bundled/worktrees/manifest.json";
+import * as worktrees from "../bundled/worktrees";
 
 // Host-owned features use the shared contribution lifecycle, without catalog
 // entries or saved enablement. Keep their keys for composer and huddle consumers.
 export const conversationFeatures: readonly BundledPlugin[] = [
+  { manifest: { ...worktreesManifest, apiVersion: 1 }, module: worktrees },
   { manifest: { ...emojiManifest, apiVersion: 1 }, module: emoji },
   { manifest: { ...mentionsManifest, apiVersion: 1 }, module: mentions },
   {

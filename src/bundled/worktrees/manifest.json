@@ -1,0 +1,19 @@
+{
+  "id": "buzz.worktrees",
+  "name": "Worktrees",
+  "apiVersion": 1,
+  "description": "Give coding chats an isolated Git worktree.",
+  "host": {
+    "files": true,
+    "processes": [
+      {
+        "id": "git",
+        "program": "git"
+      }
+    ]
+  },
+  "discovery": {
+    "category": "developer-tools",
+    "tags": ["Git", "Worktrees"]
+  }
+}

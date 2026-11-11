@@ -520,12 +520,15 @@ and are asked to sign in again in Buzz.
   Solo and each workspace; creating a workspace opens a chat draft filed there.
   Folders are optional unless **Work in a new worktree** is on. In that mode,
   add at least one project folder; the form shows a message beside Folders
-  until you add one or turn worktree mode off. In **New chat**, typing **#**
-  lists your workspaces above channels; choosing one sets the composer's
-  workspace control and leaves no text in the message. A plugin's chat, such as
-  a Nexus task, shows the workspace control when its plugin files it; until
-  that chat's first message, **#** offers its workspaces too, and choosing one
-  files the chat right away.
+  until you add one or turn worktree mode off. In the desktop app, a new Solo
+  chat shows the configured repository and base branch above its composer and
+  prepares the worktree before creating the chat. If preparation fails, the
+  chat is not created and the draft remains available to retry. In **New chat**,
+  typing **#** lists your workspaces above channels; choosing one sets the
+  composer's workspace control and leaves no text in the message. A plugin's
+  chat, such as a Nexus task, shows the workspace control when its plugin files
+  it; until that chat's first message, **#** offers its workspaces too, and
+  choosing one files the chat right away.
 - **Channel links.** Type **#** and part of a channel name to link a channel.
   The link is a chip: Backspace or Delete removes it whole, so to change it,
   remove it and pick again with **#**.

@@ -41,6 +41,28 @@
   }
 }
 
+.workspace {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 var(--space-4) var(--space-2);
+  color: var(--text-subtle);
+  font-size: var(--text-caption);
+  overflow: hidden;
+}
+
+.workspace strong {
+  color: var(--text-default);
+  font-weight: var(--type-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace span {
+  white-space: nowrap;
+}
+
 .availability {
   color: var(--text-subtle);
   font-size: var(--text-caption);

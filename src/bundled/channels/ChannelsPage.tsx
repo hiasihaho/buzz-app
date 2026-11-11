@@ -103,6 +103,7 @@ import { channelIcon, channelText } from "../../features/channels/channel-icon";
 import { communityRefusalTitle } from "../../features/federated-identity/CommunitySignIn";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
+import type { Worktrees } from "../worktrees/service";
 import {
   useChannelList,
   useChannelRoster,
@@ -163,6 +164,7 @@ export function ChannelsPage({
   archive,
   read,
   membership,
+  worktrees,
 }: {
   extensions?: ConversationExtensions | undefined;
   chatMenus?: Conversation["chatMenus"] | undefined;
@@ -171,6 +173,7 @@ export function ChannelsPage({
   communities?: CommunityReader | undefined;
   /** The viewer's community role, for the auto-join switch in Channel settings. */
   membership?: CommunityMembership | undefined;
+  worktrees?: Worktrees | undefined;
   relay: RelayData;
   navigation?: PageNavigation | undefined;
   navigator: Navigation;
@@ -333,6 +336,7 @@ export function ChannelsPage({
           agents={agents}
           communities={communities}
           membership={membership}
+          worktrees={worktrees}
         />
       )}
     </section>
@@ -364,11 +368,13 @@ function ChannelWorkspace({
   archive,
   read,
   membership,
+  worktrees,
 }: {
   extensions?: ConversationExtensions | undefined;
   chatMenus?: Conversation["chatMenus"] | undefined;
   agents?: Agents | undefined;
   membership?: CommunityMembership | undefined;
+  worktrees?: Worktrees | undefined;
   companion?: ReactNode;
   communities?: CommunityReader | undefined;
   scope: string;
@@ -2573,6 +2579,7 @@ function ChannelWorkspace({
               session={queries}
               scope={scope}
               extensions={extensions}
+              worktrees={worktrees}
               onStarted={(channelId) => {
                 if (!behindSettings()) select(channelId);
                 else

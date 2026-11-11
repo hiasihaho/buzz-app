@@ -6,7 +6,7 @@ import {
 } from "../messages/message-tokens";
 import "@testing-library/jest-dom/vitest";
 import { webcrypto } from "node:crypto";
-import { projectTemplateId } from "./workspace";
+import { projectTemplateId, workspaceCanvas } from "./workspace";
 import { composerDOMFixture } from "../messages/composer-testing";
 import { assert, afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mentionDraft } from "../messages/mention-draft";
@@ -1302,6 +1302,144 @@ it("edits draft settings before creation, restores them, and applies Canvas once
     ),
   );
   expect(order).toEqual(["send", "canvas"]);
+});
+
+it("prepares a configured worktree before creating the Solo chat", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  const f = setup();
+  const id = await projectTemplateId("work");
+  const prepare = vi.fn(async () => undefined);
+  const value = {
+    folders: ["/repo"],
+    worktree: { location: "/trees", baseBranch: "main" },
+    canvas: "Build carefully",
+  };
+  Object.assign(f.session, {
+    channelKit: {
+      refresh: async () => {},
+      snapshot: () => ({
+        status: "ready",
+        entries: [
+          {
+            eventId: "head",
+            record: {
+              value: {
+                type: "template",
+                id,
+                canvas: workspaceCanvas(value),
+                agents: [],
+                teamIds: [],
+              },
+            },
+          },
+        ],
+      }),
+    },
+    soloPreferences: {
+      writable: true,
+      refresh: async () => {},
+      snapshot: () => ({
+        status: "ready",
+        data: { sections: [{ id: "work", name: "Work" }], assignments: {} },
+      }),
+      assign: async () => {},
+    },
+  });
+  const worktrees = {
+    workspace: vi.fn(() => ({
+      repository: "/repo",
+      location: "/trees",
+      baseBranch: "main",
+    })),
+    prepare,
+  };
+  render(
+    <SoloDraft
+      session={f.session}
+      scope="test"
+      projectId="work"
+      worktrees={worktrees}
+      onStarted={vi.fn()}
+    />,
+  );
+  expect(await screen.findByText("New worktree")).toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.type(screen.getByRole("textbox"), "Build this");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+  expect(f.channelWrites.create).toHaveBeenCalledOnce();
+  expect(prepare.mock.invocationCallOrder[0]).toBeLessThan(
+    f.channelWrites.create.mock.invocationCallOrder[0] as number,
+  );
+});
+
+it("keeps the draft and creates no chat when worktree preparation fails", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  const f = setup();
+  const id = await projectTemplateId("work");
+  const value = {
+    folders: ["/repo"],
+    worktree: { location: "/trees", baseBranch: "main" },
+    canvas: "",
+  };
+  Object.assign(f.session, {
+    channelKit: {
+      refresh: async () => {},
+      snapshot: () => ({
+        status: "ready",
+        entries: [
+          {
+            eventId: "head",
+            record: {
+              value: {
+                type: "template",
+                id,
+                canvas: workspaceCanvas(value),
+                agents: [],
+                teamIds: [],
+              },
+            },
+          },
+        ],
+      }),
+    },
+    soloPreferences: {
+      writable: true,
+      refresh: async () => {},
+      snapshot: () => ({
+        status: "ready",
+        data: { sections: [{ id: "work", name: "Work" }], assignments: {} },
+      }),
+      assign: async () => {},
+    },
+  });
+  render(
+    <SoloDraft
+      session={f.session}
+      scope="test"
+      projectId="work"
+      worktrees={{
+        workspace: () => ({
+          repository: "/repo",
+          location: "/trees",
+          baseBranch: "main",
+        }),
+        prepare: async () => {
+          throw new Error("Git could not create the worktree");
+        },
+      }}
+      onStarted={vi.fn()}
+    />,
+  );
+  const user = userEvent.setup();
+  const input = screen.getByRole("textbox");
+  await user.type(input, "Keep this task");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Git could not create the worktree",
+  );
+  expect(input).toHaveTextContent("Keep this task");
+  expect(f.channelWrites.create).not.toHaveBeenCalled();
 });
 
 it("a new Solo chat starts with the default lifetime unless its settings chose another", async () => {

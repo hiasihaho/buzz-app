@@ -27,6 +27,7 @@ export const inject = [
   "shortcuts",
   "communityReader",
   "adminAccess",
+  "worktrees",
 ];
 export const apply: PluginModule["apply"] = (ctx) => {
   registerCanvas(ctx);
@@ -156,6 +157,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         agents={agents}
         communities={ctx.communityReader}
         membership={membership}
+        worktrees={ctx.worktrees}
       />
     ),
   });
