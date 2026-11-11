@@ -7,15 +7,17 @@ export function workspaceAgents(
   channelId: string,
 ): string[] {
   const observed = workingAgents(session.agentActivity.snapshot(), channelId);
-  const choices = new Set(
-    session.agentChoices.snapshot().identities.map(({ pubkey }) => pubkey),
-  );
-  const typing = session.typing
+  const typingInChannel = session.typing
     .snapshot()
-    .filter(
-      ({ channelId: typedChannel, pubkey }) =>
-        typedChannel === channelId && choices.has(pubkey),
-    )
+    .filter(({ channelId: typedChannel }) => typedChannel === channelId);
+  const choiceSnapshot = session.agentChoices.snapshot();
+  if (typingInChannel.length > 0 && choiceSnapshot.status !== "ready")
+    throw new Error("Available agents have not finished loading");
+  const choices = new Set(
+    choiceSnapshot.identities.map(({ pubkey }) => pubkey),
+  );
+  const typing = typingInChannel
+    .filter(({ pubkey }) => choices.has(pubkey))
     .map(({ pubkey }) => pubkey);
   return [...new Set([...observed, ...typing])].sort();
 }

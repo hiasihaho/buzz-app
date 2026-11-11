@@ -1,9 +1,5 @@
 import type { Host } from "../../features/host/service";
-import {
-  type Workspace,
-  workspaceCanvas,
-  workspaceDirectories,
-} from "../../features/solo/workspace";
+import { type Workspace, workspaceCanvas } from "../../features/solo/workspace";
 import { BindingStore, type WorkspaceBinding } from "./binding";
 import { prepareWorkspace, WorkspaceIntentConflict } from "./prepare";
 import { reconcileWorkspaceStatus, type WorkspaceStatus } from "./status";
@@ -73,6 +69,7 @@ export type Worktrees = WorktreePreparation &
     recover(channelId: string): Promise<WorkspaceBinding>;
   }>;
 
+const workspaceBlockStart = "<!-- buzz-session-workspace:v1 ";
 const workspaceBlockEnd = "<!-- /buzz-session-workspace -->";
 
 /** Replaces create-time instructions with the worktree Buzz already prepared. */
@@ -100,14 +97,26 @@ export function removedWorkspaceCanvas(
     "path" | "branch" | "repoRoot" | "baseRef" | "baseSha"
   >,
 ): string {
-  const retained = `Branch \`${binding.branch}\` and its commits remain in the repository.`;
-  if (!workspaceDirectories(content).includes(binding.path)) {
-    if (content.includes(retained)) return content;
-    throw new Error("Canvas no longer names this worktree");
+  const start = content.indexOf(workspaceBlockStart);
+  const end = start < 0 ? -1 : content.indexOf(workspaceBlockEnd, start);
+  if (start < 0 || end < 0) return content;
+  const metadataEnd = content.indexOf(" -->", start);
+  if (metadataEnd < 0 || metadataEnd > end) return content;
+  try {
+    const metadata = JSON.parse(
+      content.slice(start + workspaceBlockStart.length, metadataEnd),
+    ) as { folders?: unknown };
+    if (
+      !Array.isArray(metadata.folders) ||
+      !metadata.folders.includes(binding.path)
+    )
+      return content;
+  } catch {
+    return content;
   }
-  const end = content.indexOf(workspaceBlockEnd);
-  if (end < 0) throw new Error("Workspace Canvas block is missing");
-  const suffix = content
+
+  const before = content.slice(0, start);
+  const afterBlock = content
     .slice(end + workspaceBlockEnd.length)
     .replace(/^\n\n/, "");
   const generated = [
@@ -118,15 +127,16 @@ export function removedWorkspaceCanvas(
     `- The worktree already exists from \`${binding.baseRef}\` at \`${binding.baseSha}\`; do not create another worktree.`,
     "",
   ].join("\n");
-  if (!suffix.startsWith(generated))
-    throw new Error("Canvas prepared-worktree instructions changed");
-  const authored = suffix.slice(generated.length);
-  return [
+  const after = afterBlock.startsWith(generated)
+    ? afterBlock.slice(generated.length)
+    : afterBlock;
+  const retained = [
     "## Worktree removed",
     "",
     `The local worktree was removed. Branch \`${binding.branch}\` and its commits remain in the repository.`,
-    ...(authored ? ["", authored] : []),
   ].join("\n");
+  const remainder = `${before}${after}`;
+  return remainder ? `${retained}\n\n${remainder}` : retained;
 }
 
 export function createWorktrees(

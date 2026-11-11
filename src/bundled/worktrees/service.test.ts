@@ -1,3 +1,7 @@
+import { spawn as spawnProcess, spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { Host } from "../../features/host/service";
 import { BindingStore, type WorkspaceBinding } from "./binding";
@@ -22,6 +26,55 @@ function storage(): Storage {
       values.set(key, value);
     },
   } as unknown as Storage;
+}
+
+function realSpawn(): NonNullable<Host["spawn"]> {
+  return async (id, options = {}) => {
+    const child = spawnProcess(id, options.args ?? [], {
+      env: {
+        ...process.env,
+        ...Object.fromEntries(
+          Object.entries(options.env ?? {}).filter(
+            (entry): entry is [string, string] => entry[1] !== null,
+          ),
+        ),
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_NOSYSTEM: "1",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    child.stdout.on("data", (data) => options.onStdout?.(data.toString()));
+    child.stderr.on("data", (data) => options.onStderr?.(data.toString()));
+    return {
+      write: async (data: string) => {
+        child.stdin.write(data);
+      },
+      end: async (data?: string) => {
+        child.stdin.end(data);
+      },
+      kill: async () => {
+        child.kill();
+      },
+      exited: new Promise<number | null>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("exit", resolve);
+      }),
+    };
+  };
+}
+
+function run(repo: string, args: readonly string[]): string {
+  const result = spawnSync("git", ["-C", repo, ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+    },
+  });
+  if (result.status !== 0)
+    throw new Error(result.stderr || `git ${args.join(" ")} failed`);
+  return result.stdout.trim();
 }
 
 describe("worktree chat service", () => {
@@ -384,5 +437,165 @@ describe("worktree chat service", () => {
     expect(
       service.workspace({ ...workspace, folders: ["/one", "/two"] }),
     ).toBeUndefined();
+  });
+
+  it("treats an absent or unrelated managed Canvas block as already retired", () => {
+    const binding: WorkspaceBinding = {
+      bindingId: "binding",
+      channelId: "channel",
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task",
+      branch: "buzz/task",
+      baseRef: "main",
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 1,
+      installId: "install",
+      owned: true,
+      state: "removed",
+    };
+    expect(removedWorkspaceCanvas("Authored only", binding)).toBe(
+      "Authored only",
+    );
+    const unrelated = preparedWorkspaceCanvas(
+      { ...workspace, canvas: "Keep" },
+      { ...binding, path: "/trees/other", state: "ready" },
+    );
+    expect(removedWorkspaceCanvas(unrelated, binding)).toBe(unrelated);
+  });
+
+  it("removes a matching block while preserving edited text around it", () => {
+    const binding: WorkspaceBinding = {
+      bindingId: "binding",
+      channelId: "channel",
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task",
+      branch: "buzz/task",
+      baseRef: "main",
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 1,
+      installId: "install",
+      owned: true,
+      state: "removed",
+    };
+    const prepared = preparedWorkspaceCanvas(
+      { ...workspace, canvas: "Authored text" },
+      { ...binding, state: "ready" },
+    );
+    const edited = `Text before the block.\n\n${prepared.replace(
+      "## Prepared worktree",
+      "## Manually edited worktree",
+    )}`;
+    const removed = removedWorkspaceCanvas(edited, binding);
+    expect(removed).toMatch(/^## Worktree removed/);
+    expect(removed).not.toContain("buzz-session-workspace");
+    expect(removed).toContain("Text before the block.");
+    expect(removed).toContain("## Manually edited worktree");
+    expect(removed).toContain("Authored text");
+  });
+
+  it.each(["removing", "removed"] as const)(
+    "summarizes a %s binding without probing removed worktree status",
+    async (state) => {
+      const saved = storage();
+      saved.setItem("buzz.worktrees.install.v1", "different-install");
+      const binding: WorkspaceBinding = {
+        bindingId: "binding",
+        channelId: "channel",
+        repoRoot: "/repo",
+        worktreeRoot: "/trees",
+        path: "/trees/task",
+        branch: "buzz/task",
+        baseRef: "main",
+        baseSha: "a".repeat(40),
+        gitCommonDir: "/repo/.git",
+        createdAt: 1,
+        installId: "install",
+        owned: true,
+        state,
+      };
+      new BindingStore(saved).set(binding);
+      const spawn = vi.fn() as NonNullable<Host["spawn"]>;
+      const service = createWorktrees(
+        { spawn, resolveDirectory: async (value) => value },
+        saved,
+      );
+      await expect(service.summary(binding.channelId)).resolves.toMatchObject({
+        lifecycle: state,
+        branch: binding.branch,
+      });
+      expect(service.canDiff(binding.channelId)).toBe(false);
+      expect(spawn).not.toHaveBeenCalled();
+    },
+  );
+
+  it("exercises finish, removal, recovery, summary, and diff eligibility through the service", async () => {
+    const created = await mkdtemp(join(tmpdir(), "buzz-worktree-service-"));
+    const root = await realpath(created);
+    try {
+      const repoRoot = join(root, "repo");
+      const worktreeRoot = join(root, "trees");
+      const path = join(worktreeRoot, "task");
+      await mkdir(repoRoot);
+      await mkdir(worktreeRoot);
+      run(root, ["init", "-q", "-b", "main", repoRoot]);
+      await writeFile(join(repoRoot, "README.md"), "base\n");
+      run(repoRoot, ["add", "README.md"]);
+      run(repoRoot, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "commit",
+        "-qm",
+        "base",
+      ]);
+      run(repoRoot, ["worktree", "add", "-qb", "buzz/task", path, "main"]);
+      const head = run(path, ["rev-parse", "HEAD"]);
+      const saved = storage();
+      saved.setItem("buzz.worktrees.install.v1", "install");
+      const binding: WorkspaceBinding = {
+        bindingId: "binding",
+        channelId: "channel",
+        repoRoot,
+        worktreeRoot,
+        path,
+        branch: "buzz/task",
+        baseRef: "main",
+        baseSha: head,
+        gitCommonDir: await realpath(join(repoRoot, ".git")),
+        createdAt: 1,
+        installId: "install",
+        owned: true,
+        state: "ready",
+      };
+      new BindingStore(saved).set(binding);
+      const service = createWorktrees(
+        { spawn: realSpawn(), resolveDirectory: async (value) => value },
+        saved,
+      );
+      await expect(
+        service.previewFinish(binding.channelId, () => []),
+      ).resolves.toMatchObject({ head, blockers: [] });
+      await expect(
+        service.remove(binding.channelId, head, () => []),
+      ).resolves.toMatchObject({ state: "removed" });
+      await expect(service.summary(binding.channelId)).resolves.toMatchObject({
+        lifecycle: "removed",
+        branch: binding.branch,
+      });
+      expect(service.canDiff(binding.channelId)).toBe(false);
+      await expect(service.recover(binding.channelId)).resolves.toMatchObject({
+        state: "removed",
+      });
+      expect(run(repoRoot, ["rev-parse", `refs/heads/${binding.branch}`])).toBe(
+        head,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

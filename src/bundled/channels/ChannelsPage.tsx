@@ -2429,6 +2429,7 @@ function ChannelWorkspace({
         current.viewerRole !== "guest" &&
         (!current.readOnly || current.cached) && (
           <WorktreeStatusBar
+            key={current.id}
             channelId={current.id}
             worktrees={worktrees}
             session={queries}

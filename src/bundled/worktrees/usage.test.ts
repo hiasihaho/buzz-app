@@ -23,9 +23,37 @@ it("includes an app-managed agent whose only live evidence is typing", () => {
       ],
     },
     agentChoices: {
-      snapshot: () => ({ identities: [{ pubkey: typer, name: "Builder" }] }),
+      snapshot: () => ({
+        status: "ready",
+        identities: [{ pubkey: typer, name: "Builder" }],
+      }),
     },
   } as unknown as Session;
 
   expect(workspaceAgents(session, "chat")).toEqual([typer]);
+});
+
+it("fails closed when typing exists before agent choices are ready", () => {
+  const typer = "a".repeat(64);
+  const session = {
+    agentActivity: {
+      snapshot: () => ({
+        status: "listening",
+        records: [],
+        turns: [],
+        typing: [],
+        trimmed: 0,
+      }),
+    },
+    typing: {
+      snapshot: () => [{ channelId: "chat", pubkey: typer }],
+    },
+    agentChoices: {
+      snapshot: () => ({ status: "loading", identities: [] }),
+    },
+  } as unknown as Session;
+
+  expect(() => workspaceAgents(session, "chat")).toThrow(
+    "Available agents have not finished loading",
+  );
 });

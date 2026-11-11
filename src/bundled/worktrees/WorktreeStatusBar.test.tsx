@@ -4,6 +4,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { writeClipboardText } from "../../shared/clipboard";
+import type { WorkspaceFinishPreview } from "./finish";
 import {
   preparedWorkspaceCanvas,
   type WorktreeSummary,
@@ -40,6 +41,13 @@ const summary: WorktreeSummary = {
   lifecycle: "ready",
   status: readyStatus,
 };
+
+function summaryForLifecycle(
+  lifecycle: WorktreeSummary["lifecycle"],
+): WorktreeSummary {
+  const { status: _status, ...rest } = summary;
+  return { ...rest, lifecycle };
+}
 
 const session = {
   agentActivity: {
@@ -123,6 +131,18 @@ it("shows repository status and opens the diff and commit details", async () => 
   expect(screen.getByText("buzz/example-task")).toBeVisible();
   expect(screen.getByText("Base origin/main")).toBeVisible();
   expect(screen.getByText("Changed")).toBeVisible();
+
+  for (const [name, hint] of [
+    [/View 3 changed files/, "View local changes"],
+    [/2 local commits/, "Local commit details"],
+    ["Copy worktree path", "Copy worktree path"],
+    ["Refresh local worktree status", "Refresh local worktree status"],
+  ] as const) {
+    const button = screen.getByRole("button", { name });
+    await user.hover(button);
+    expect(await screen.findByRole("tooltip", { name: hint })).toBeVisible();
+    await user.unhover(button);
+  }
 
   await user.click(
     screen.getByRole("button", { name: /View 3 changed files/ }),
@@ -239,6 +259,7 @@ it("removes the exact previewed HEAD and updates Canvas", async () => {
     "channel",
     expect.not.stringContaining(summary.path),
     "canvas-head",
+    { preserveApproval: true },
   );
 });
 
@@ -460,4 +481,206 @@ it("aborts the current request when unmounted", async () => {
 
   view.unmount();
   expect(signal?.aborted).toBe(true);
+});
+
+it("remounts chat-owned finish state when the channel changes", async () => {
+  const user = userEvent.setup();
+  const pending = deferred<WorkspaceFinishPreview>();
+  const previewFinish = vi.fn<Worktrees["previewFinish"]>((channelId) =>
+    channelId === "first"
+      ? pending.promise
+      : Promise.resolve({
+          bindingId: "second-binding",
+          path: "/trees/second",
+          branch: "buzz/second",
+          head,
+          blockers: [],
+        }),
+  );
+  const trees = service(
+    async (channelId) => ({
+      ...summary,
+      path: `/trees/${channelId}`,
+      branch: `buzz/${channelId}`,
+    }),
+    true,
+    { previewFinish },
+  );
+  const props = {
+    worktrees: trees,
+    openDiff: () => {},
+    agentWorking: false,
+    session,
+    canvas,
+  };
+  const view = render(
+    <WorktreeStatusBar key="first" channelId="first" {...props} />,
+  );
+  await screen.findByText("buzz/first");
+  await user.click(screen.getByRole("button", { name: "Finish" }));
+  expect(previewFinish).toHaveBeenCalledWith("first", expect.any(Function));
+
+  view.rerender(
+    <WorktreeStatusBar key="second" channelId="second" {...props} />,
+  );
+  expect(await screen.findByText("buzz/second")).toBeVisible();
+  act(() =>
+    pending.resolve({
+      bindingId: "first-binding",
+      path: "/trees/first",
+      branch: "buzz/first",
+      head,
+      blockers: [],
+    }),
+  );
+  expect(
+    screen.queryByRole("dialog", { name: "Remove local worktree?" }),
+  ).not.toBeInTheDocument();
+});
+
+it("shows removing and removed lifecycle states", async () => {
+  const trees = service(
+    async (channelId) =>
+      summaryForLifecycle(channelId === "removing" ? "removing" : "removed"),
+    true,
+    {
+      recover: vi.fn(async () => ({ state: "removed" }) as never),
+    },
+  );
+  const props = {
+    worktrees: trees,
+    openDiff: () => {},
+    agentWorking: false,
+    session,
+    canvas: { read: vi.fn(async () => undefined), save: vi.fn() } as never,
+  };
+  const view = render(<WorktreeStatusBar channelId="removing" {...props} />);
+  expect(await screen.findByText("Removal needs checking")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
+
+  view.rerender(
+    <WorktreeStatusBar key="removed" channelId="removed" {...props} />,
+  );
+  expect(
+    await screen.findByText(/Worktree removed; branch .* remains/),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Finish" }),
+  ).not.toBeInTheDocument();
+});
+
+it("keeps a Canvas write failure visible and retries it", async () => {
+  const user = userEvent.setup();
+  const prepared = preparedWorkspaceCanvas(
+    { folders: [summary.repository], canvas: "Authored" },
+    {
+      bindingId: "binding",
+      channelId: "channel",
+      repoRoot: summary.repository,
+      worktreeRoot: "/trees",
+      path: summary.path,
+      branch: summary.branch,
+      baseRef: summary.baseRef,
+      baseSha: summary.baseSha,
+      gitCommonDir: "/repo/.git",
+      createdAt: 1,
+      installId: "install",
+      owned: true,
+      state: "ready",
+    },
+  );
+  const save = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("relay rejected save"))
+    .mockResolvedValueOnce({ id: "saved" });
+  const canvasFixture = {
+    read: vi.fn(async () => ({ id: "canvas-head", content: prepared })),
+    save,
+  } as never;
+  render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(async () => summaryForLifecycle("removed"))}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={canvasFixture}
+    />,
+  );
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "relay rejected save",
+  );
+  await user.click(screen.getByRole("button", { name: "Retry Canvas update" }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("reports a removal failure in the dialog and refreshes status", async () => {
+  const user = userEvent.setup();
+  const load = vi.fn(async () => summary);
+  const remove = vi.fn(async () => {
+    throw new Error("Git denied worktree removal");
+  });
+  render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(load, true, { remove })}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={canvas}
+    />,
+  );
+  await screen.findByText("buzz/example-task");
+  await user.click(screen.getByRole("button", { name: "Finish" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Remove worktree" }),
+  );
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Removal failed: Git denied worktree removal",
+  );
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+});
+
+it("exposes status and Canvas errors in the shared reason popover", async () => {
+  const user = userEvent.setup();
+  render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(async () => {
+        throw new Error("Repository identity changed");
+      })}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={canvas}
+    />,
+  );
+  await user.click(
+    await screen.findByRole("button", {
+      name: "Local worktree needs attention; show reason",
+    }),
+  );
+  expect(screen.getAllByText("Repository identity changed")).toHaveLength(2);
+});
+
+it("updates a removed Canvas once per chat opening, not every refresh", async () => {
+  const read = vi.fn(async () => undefined);
+  const load = vi.fn(async () => summaryForLifecycle("removed"));
+  render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(load)}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={{ read, save: vi.fn() } as never}
+    />,
+  );
+  await waitFor(() => expect(read).toHaveBeenCalledOnce());
+  act(() => window.dispatchEvent(new Event("focus")));
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+  expect(read).toHaveBeenCalledOnce();
 });

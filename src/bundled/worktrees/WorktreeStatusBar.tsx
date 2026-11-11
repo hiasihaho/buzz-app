@@ -82,6 +82,28 @@ function Blocker({ blocker }: { blocker: FinishBlocker }) {
   );
 }
 
+function ErrorPopover({ message }: { message: string }) {
+  return (
+    <PopoverRoot>
+      <PopoverTrigger
+        render={
+          <IconButton
+            size="xs"
+            variant="ghost"
+            aria-label="Local worktree needs attention; show reason"
+            title="Show worktree status problem"
+            icon={<WarningCircleIcon size={14} aria-hidden="true" />}
+          />
+        }
+      />
+      <PopoverPopup side="top" align="end" size="compact">
+        <PopoverTitle>Local worktree needs attention</PopoverTitle>
+        <PopoverDescription>{message}</PopoverDescription>
+      </PopoverPopup>
+    </PopoverRoot>
+  );
+}
+
 export function WorktreeStatusBar({
   channelId,
   worktrees,
@@ -106,7 +128,11 @@ export function WorktreeStatusBar({
   const [copyStatus, setCopyStatus] = useState("");
   const [finish, setFinish] = useState<
     | { status: "loading" }
-    | { status: "ready"; preview: WorkspaceFinishPreview }
+    | {
+        status: "ready";
+        preview: WorkspaceFinishPreview;
+        removalError?: string;
+      }
     | { status: "error"; message: string }
   >();
   const [removing, setRemoving] = useState(false);
@@ -148,17 +174,29 @@ export function WorktreeStatusBar({
       },
     );
   }, [available, channelId, worktrees]);
-  const loadPreview = useCallback(async () => {
-    setFinish({ status: "loading" });
-    try {
-      const preview = await worktrees.previewFinish(channelId, () =>
-        workspaceAgents(session, channelId),
-      );
-      setFinish({ status: "ready", preview });
-    } catch (reason) {
-      setFinish({ status: "error", message: message(reason) });
-    }
-  }, [channelId, session, worktrees]);
+  const loadPreview = useCallback(
+    async (removalError?: string) => {
+      setFinish({ status: "loading" });
+      try {
+        const preview = await worktrees.previewFinish(channelId, () =>
+          workspaceAgents(session, channelId),
+        );
+        setFinish({
+          status: "ready",
+          preview,
+          ...(removalError ? { removalError } : {}),
+        });
+      } catch (reason) {
+        setFinish({
+          status: "error",
+          message: removalError
+            ? `${removalError}. Status could not be checked again: ${message(reason)}`
+            : message(reason),
+        });
+      }
+    },
+    [channelId, session, worktrees],
+  );
   const updateCanvas = useCallback(
     async (
       workspace: Pick<
@@ -168,14 +206,19 @@ export function WorktreeStatusBar({
         ({ repository: string } | { repoRoot: string }),
     ) => {
       const head = await canvas.read(channelId);
-      if (!head) throw new Error("Canvas could not be read");
+      if (!head) {
+        setCanvasError("");
+        return;
+      }
       const content = removedWorkspaceCanvas(head.content, {
         ...workspace,
         repoRoot:
           "repoRoot" in workspace ? workspace.repoRoot : workspace.repository,
       });
       if (content !== head.content)
-        await canvas.save(channelId, content, head.id);
+        await canvas.save(channelId, content, head.id, {
+          preserveApproval: true,
+        });
       setCanvasError("");
     },
     [canvas, channelId],
@@ -199,30 +242,32 @@ export function WorktreeStatusBar({
     )
       refresh();
   }, [agentWorking, channelId, refresh]);
+  const removedSummary = useRef<WorktreeSummary | undefined>(undefined);
+  const currentSummary =
+    stored.channelId === channelId && "summary" in stored
+      ? stored.summary
+      : undefined;
+  const removed = currentSummary?.lifecycle === "removed";
+  removedSummary.current = removed ? currentSummary : undefined;
   useEffect(() => {
-    if (
-      stored.channelId !== channelId ||
-      !("summary" in stored) ||
-      stored.summary?.lifecycle !== "removed"
-    )
-      return;
-    void updateCanvas(stored.summary).catch((reason) =>
+    const workspace = removedSummary.current;
+    if (!removed || !workspace) return;
+    void updateCanvas(workspace).catch((reason) =>
       setCanvasError(
         `Worktree removed, but Canvas could not be updated: ${message(reason)}`,
       ),
     );
-  }, [channelId, stored, updateCanvas]);
+  }, [removed, updateCanvas]);
 
   if (!available) return null;
   const state: State =
     stored.channelId === channelId ? stored : { channelId, status: "loading" };
-  const summary = "summary" in state ? state.summary : undefined;
+  const summary = currentSummary;
   const fileCount = summary?.status?.fileCount ?? 0;
   const ahead = summary?.status?.ahead;
   const unpublished = summary?.unpublishedCommits;
   const changed = summary?.status?.dirty;
   const ready = summary?.lifecycle === "ready";
-  const removed = summary?.lifecycle === "removed";
   const recovery = summary?.lifecycle === "removing";
   const statusLabel =
     state.status === "loading"
@@ -240,6 +285,8 @@ export function WorktreeStatusBar({
         : changed
           ? CircleDashedIcon
           : CheckCircleIcon;
+  const errorMessage =
+    canvasError || (state.status === "error" ? state.message : "");
 
   const confirmRemoval = async () => {
     if (finish?.status !== "ready" || !finish.preview.head || !summary) return;
@@ -257,8 +304,10 @@ export function WorktreeStatusBar({
       }
       setFinish(undefined);
       refresh();
-    } catch {
-      await loadPreview();
+    } catch (reason) {
+      const removalError = message(reason);
+      refresh();
+      await loadPreview(removalError);
     } finally {
       setRemoving(false);
     }
@@ -303,6 +352,7 @@ export function WorktreeStatusBar({
           )}
         </div>
         <div className={styles.actions}>
+          {errorMessage && <ErrorPopover message={errorMessage} />}
           {removed ? (
             <span className={styles.state} role="status">
               Worktree removed; branch {summary?.branch} remains
@@ -323,7 +373,6 @@ export function WorktreeStatusBar({
             <>
               {state.status === "error" ? (
                 <span className={styles.state}>
-                  <WarningCircleIcon size={14} aria-hidden="true" />
                   <span className={styles.statusText}>Check needed</span>
                 </span>
               ) : (
@@ -352,6 +401,9 @@ export function WorktreeStatusBar({
                 }
                 onClick={openDiff}
                 disabled={!ready}
+                title={
+                  ready ? "View local changes" : "Local changes are unavailable"
+                }
               >
                 <FileTextIcon size={14} aria-hidden="true" />
                 <span>{fileCount}</span>
@@ -368,6 +420,7 @@ export function WorktreeStatusBar({
                           ? "Local commit details"
                           : `${countLabel(ahead, "local commit")}; show details`
                       }
+                      title="Local commit details"
                     >
                       <GitCommitIcon size={14} aria-hidden="true" />
                       <span>{ahead ?? "—"}</span>
@@ -392,6 +445,9 @@ export function WorktreeStatusBar({
                 variant="ghost"
                 disabled={!summary}
                 aria-label="Copy worktree path"
+                title={
+                  summary ? "Copy worktree path" : "Worktree path is loading"
+                }
                 icon={<CopyIcon size={13} aria-hidden="true" />}
                 onClick={() =>
                   summary &&
@@ -415,15 +471,16 @@ export function WorktreeStatusBar({
                 variant="ghost"
                 onClick={refresh}
                 aria-label="Refresh local worktree status"
+                title="Refresh local worktree status"
                 loading={busy}
                 icon={<ArrowsClockwiseIcon size={13} />}
               />
             </>
           )}
         </div>
-        {(state.status === "error" || canvasError) && (
+        {errorMessage && (
           <span className={styles.error} role="alert">
-            {canvasError || (state.status === "error" ? state.message : "")}
+            {errorMessage}
           </span>
         )}
         {removed && canvasError && summary && (
@@ -477,6 +534,9 @@ export function WorktreeStatusBar({
             <p role="alert">{finish.message}</p>
           ) : (
             <>
+              {finish.removalError && (
+                <p role="alert">Removal failed: {finish.removalError}</p>
+              )}
               <dl className={styles.details}>
                 <div>
                   <dt>Path</dt>
