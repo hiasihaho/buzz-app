@@ -1,7 +1,7 @@
 import type { Host } from "../../features/host/service";
 import { type Workspace, workspaceCanvas } from "../../features/solo/workspace";
 import { BindingStore, type WorkspaceBinding } from "./binding";
-import { prepareWorkspace } from "./prepare";
+import { prepareWorkspace, WorkspaceIntentConflict } from "./prepare";
 
 const INSTALL_ID_KEY = "buzz.worktrees.install.v1";
 
@@ -30,6 +30,7 @@ export function preparedWorkspaceCanvas(
     "## Prepared worktree",
     "",
     `- Work in \`${binding.path}\` on branch \`${binding.branch}\`.`,
+    `- The repository checkout \`${binding.repoRoot}\` is read-only reference; do not change it directly.`,
     `- The worktree already exists from \`${binding.baseRef}\` at \`${binding.baseSha}\`; do not create another worktree.`,
     "",
     value.canvas,
@@ -56,6 +57,7 @@ export function createWorktrees(
       const suffix = channelId.replaceAll("-", "").slice(0, 4).toLowerCase();
       const slug = taskSlug(task);
       const existing = bindings.forChannel(channelId);
+      const reusable = existing?.owned && existing.state !== "failed";
       try {
         return await prepareWorkspace(
           desktop,
@@ -64,27 +66,19 @@ export function createWorktrees(
             channelId,
             repoRoot: selected.repository,
             worktreeRoot: selected.location,
-            worktreeName:
-              existing?.owned === true
-                ? pathLeaf(existing.path)
-                : `${slug}-${suffix}`,
-            branch:
-              existing?.owned === true
-                ? existing.branch
-                : `buzz/${slug}-${suffix}`,
+            worktreeName: reusable
+              ? pathLeaf(existing.path)
+              : `${slug}-${suffix}`,
+            branch: reusable ? existing.branch : `buzz/${slug}-${suffix}`,
             baseRef: selected.baseBranch,
             installId: installId(storage),
           },
           signal ? { signal } : {},
         );
       } catch (error) {
-        if (
-          existing?.owned &&
-          error instanceof Error &&
-          error.message === "Channel already owns a different workspace binding"
-        )
+        if (existing?.owned && error instanceof WorkspaceIntentConflict)
           throw new Error(
-            `This draft already prepared ${existing.path} on ${existing.branch}. Switch back to its original workspace to retry, or open a new draft for a different workspace.`,
+            `This draft already prepared ${existing.path} on ${existing.branch}. Switch back to its original workspace to retry, or close and reopen New chat before choosing a different workspace.`,
           );
         throw error;
       }

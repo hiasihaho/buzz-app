@@ -110,7 +110,7 @@ function sameConfiguredWorktree(
 
 function worktreeTask(draft: MentionDraft): string {
   let task = draft.text;
-  for (const { start, end } of [...draft.recipients].sort(
+  for (const { start, end } of [...mentionDraft(draft).recipients].sort(
     (a, b) => b.start - a.start,
   ))
     task = task.slice(0, start) + task.slice(end);

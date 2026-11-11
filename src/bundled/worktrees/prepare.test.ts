@@ -195,6 +195,46 @@ describe("prepareWorkspace", () => {
     ]);
   });
 
+  it("replaces an owned failed intent only when no worktree was registered", async () => {
+    const saved = memory();
+    const store = new BindingStore(saved);
+    const failed: WorkspaceBinding = {
+      bindingId: "binding-1",
+      channelId: input.channelId,
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task",
+      branch: input.branch,
+      baseRef: input.baseRef,
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 10,
+      installId: input.installId,
+      owned: true,
+      state: "failed",
+    };
+    store.set(failed);
+    const replacement = { ...input, baseRef: "origin/develop" };
+    await expect(
+      prepareWorkspace(fixture().host, store, replacement, options),
+    ).resolves.toMatchObject({
+      bindingId: failed.bindingId,
+      baseRef: "origin/develop",
+      state: "ready",
+    });
+
+    store.set(failed);
+    await expect(
+      prepareWorkspace(
+        fixture({ existing: true }).host,
+        store,
+        replacement,
+        options,
+      ),
+    ).rejects.toThrow("different workspace binding");
+    expect(store.forChannel(input.channelId)).toEqual(failed);
+  });
+
   it("is idempotent after creating the intended worktree", async () => {
     const { host, calls } = fixture();
     const store = new BindingStore(memory());

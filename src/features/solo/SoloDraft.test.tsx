@@ -6,7 +6,11 @@ import {
 } from "../messages/message-tokens";
 import "@testing-library/jest-dom/vitest";
 import { webcrypto } from "node:crypto";
-import { projectTemplateId, workspaceCanvas } from "./workspace";
+import {
+  projectTemplateId,
+  type readWorkspace,
+  workspaceCanvas,
+} from "./workspace";
 import { composerDOMFixture } from "../messages/composer-testing";
 import { assert, afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mentionDraft } from "../messages/mention-draft";
@@ -1340,6 +1344,130 @@ it("shows and clears a draft-only worktree without a project", async () => {
   );
 });
 
+it("prefers a project's draft Canvas over its loaded worktree defaults", async () => {
+  const f = await projectSetup();
+  const scope = "worktree-draft-override";
+  const defaults = {
+    folders: ["/default-repo"],
+    worktree: { location: "/default-trees", baseBranch: "main" },
+    canvas: "Defaults",
+  };
+  const override = {
+    folders: ["/override-repo"],
+    worktree: { location: "/override-trees", baseBranch: "develop" },
+    canvas: "Override",
+  };
+  const work = f.entries[0];
+  if (!work) throw new Error("missing work defaults");
+  work.record.value.canvas = workspaceCanvas(defaults);
+  writeView(scope, "solo:project:work:settings", {
+    canvas: workspaceCanvas(override),
+  });
+  const workspace = vi.fn((value: typeof override) => ({
+    repository: value.folders[0] as string,
+    location: value.worktree.location,
+    baseBranch: value.worktree.baseBranch,
+  }));
+  render(
+    <SoloDraft
+      session={f.session}
+      scope={scope}
+      projectId="work"
+      worktrees={{ workspace, prepare: vi.fn(async () => undefined) }}
+      onStarted={vi.fn()}
+    />,
+  );
+  expect(await screen.findByText("/override-repo")).toBeInTheDocument();
+  expect(workspace).toHaveBeenLastCalledWith(override);
+});
+
+it("clears the worktree line immediately when switching projects", async () => {
+  const f = await projectSetup();
+  const work = f.entries[0];
+  if (!work) throw new Error("missing work defaults");
+  work.record.value.canvas = workspaceCanvas({
+    folders: ["/repo"],
+    worktree: { location: "/trees", baseBranch: "main" },
+    canvas: "Work",
+  });
+  const workspace = vi.fn((value: ReturnType<typeof readWorkspace>) =>
+    value.worktree
+      ? {
+          repository: value.folders[0] as string,
+          location: value.worktree.location,
+          baseBranch: value.worktree.baseBranch,
+        }
+      : undefined,
+  );
+  render(
+    <SoloDraft
+      session={f.session}
+      scope="worktree-project-switch"
+      projectId="work"
+      worktrees={{ workspace, prepare: vi.fn(async () => undefined) }}
+      onStarted={vi.fn()}
+    />,
+  );
+  expect(await screen.findByText("· New worktree")).toBeInTheDocument();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const refresh = vi.fn(() => held);
+  Object.assign(f.session.channelKit, { refresh });
+  const user = userEvent.setup();
+  try {
+    await user.click(screen.getByRole("button", { name: "Workspace: Work" }));
+    await user.click(
+      await screen.findByRole("menuitemradio", { name: "Other" }),
+    );
+    await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+    expect(screen.queryByText("· New worktree")).not.toBeInTheDocument();
+  } finally {
+    release();
+  }
+});
+
+it("clears a draft worktree line when project defaults fail to load", async () => {
+  const f = await projectSetup();
+  const scope = "worktree-load-failure";
+  let rejectLoad!: (reason: Error) => void;
+  const loading = new Promise<void>((_resolve, reject) => {
+    rejectLoad = reject;
+  });
+  const refresh = vi.fn(() => loading);
+  Object.assign(f.session.channelKit, { refresh });
+  const workspace = vi.fn(() => ({
+    repository: "/repo",
+    location: "/trees",
+    baseBranch: "main",
+  }));
+  render(
+    <SoloDraft
+      session={f.session}
+      scope={scope}
+      projectId="work"
+      worktrees={{ workspace, prepare: vi.fn(async () => undefined) }}
+      onStarted={vi.fn()}
+    />,
+  );
+  await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+  act(() =>
+    writeView(scope, "solo:project:work:settings", {
+      canvas: workspaceCanvas({
+        folders: ["/repo"],
+        worktree: { location: "/trees", baseBranch: "main" },
+        canvas: "Override while loading",
+      }),
+    }),
+  );
+  expect(await screen.findByText("· New worktree")).toBeInTheDocument();
+  await act(async () => rejectLoad(new Error("Settings unavailable")));
+  await waitFor(() =>
+    expect(screen.queryByText("· New worktree")).not.toBeInTheDocument(),
+  );
+});
+
 it("ignores a hand-edited managed block without worktree mode", () => {
   writeView("test", "solo:settings", {
     canvas: workspaceCanvas({ folders: ["/repo"], canvas: "Notes" }).replace(
@@ -1423,6 +1551,7 @@ it("prepares a configured worktree before creating the Solo chat", async () => {
     })),
     prepare,
   };
+  writeView("test", "solo:project:work:new-draft", taggedDraft("Build this"));
   render(
     <SoloDraft
       session={f.session}
@@ -1434,7 +1563,6 @@ it("prepares a configured worktree before creating the Solo chat", async () => {
   );
   expect(await screen.findByText("· New worktree")).toBeInTheDocument();
   const user = userEvent.setup();
-  await user.type(screen.getByRole("textbox"), "Build this");
   await user.click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(prepare).toHaveBeenCalledOnce());
   expect(prepare).toHaveBeenCalledWith(expect.any(String), value, "Build this");
@@ -1442,6 +1570,7 @@ it("prepares a configured worktree before creating the Solo chat", async () => {
   expect(startedCanvas).toContain(
     "Work in `/trees/build-this-abcd` on branch `buzz/build-this-abcd`",
   );
+  expect(startedCanvas).toContain("repository checkout `/repo` is read-only");
   expect(startedCanvas).not.toContain("create a new worktree");
   expect(f.channelWrites.create).toHaveBeenCalledOnce();
   expect(prepare.mock.invocationCallOrder[0]).toBeLessThan(

@@ -10,6 +10,13 @@ import {
 
 type DesktopHost = Required<Pick<Host, "spawn" | "resolveDirectory">>;
 
+export class WorkspaceIntentConflict extends Error {
+  constructor() {
+    super("Channel already owns a different workspace binding");
+    this.name = "WorkspaceIntentConflict";
+  }
+}
+
 export type PrepareWorkspaceInput = Readonly<{
   channelId: string;
   repoRoot: string;
@@ -48,13 +55,18 @@ export async function prepareWorkspace(
   const path = await host.resolveDirectory(requestedPath);
   assertPathWithinRoot(worktreeRoot, path);
   const existing = bindings.forChannel(input.channelId);
-  if (
-    existing?.owned &&
-    !sameIntent(existing, input, repoRoot, worktreeRoot, path)
-  )
-    throw new Error("Channel already owns a different workspace binding");
+  const sameExistingIntent =
+    existing?.owned === true &&
+    sameIntent(existing, input, repoRoot, worktreeRoot, path);
+  const replacingFailed =
+    existing?.owned === true &&
+    existing.state === "failed" &&
+    !sameExistingIntent &&
+    !(await findWorktree(host, existing, options.signal));
+  if (existing?.owned && !sameExistingIntent && !replacingFailed)
+    throw new WorkspaceIntentConflict();
 
-  const baseSha = existing?.owned
+  const baseSha = sameExistingIntent
     ? existing.baseSha
     : trimSha(
         await runGit(
@@ -90,8 +102,8 @@ export async function prepareWorkspace(
     baseSha,
     gitCommonDir,
   };
-  if (existing?.owned && !sameResolvedIntent(existing, identity))
-    throw new Error("Channel already owns a different workspace binding");
+  if (sameExistingIntent && !sameResolvedIntent(existing, identity))
+    throw new WorkspaceIntentConflict();
 
   const preparing: WorkspaceBinding = {
     bindingId: existing?.bindingId ?? options.newId?.() ?? crypto.randomUUID(),
@@ -103,9 +115,9 @@ export async function prepareWorkspace(
     state: "preparing",
   };
   let worktree = await findWorktree(host, preparing, options.signal);
-  if (!existing?.owned && worktree)
+  if (!sameExistingIntent && worktree)
     throw new Error("Workspace path is already registered as a worktree");
-  if (existing?.owned)
+  if (sameExistingIntent)
     worktree = await recoverPrunableWorktree(
       host,
       preparing,

@@ -121,8 +121,74 @@ describe("worktree chat service", () => {
         "Changed workspace",
       ),
     ).rejects.toThrow(
-      "Switch back to its original workspace to retry, or open a new draft",
+      "Switch back to its original workspace to retry, or close and reopen New chat",
     );
+  });
+
+  it("replaces an unregistered failed binding with the corrected workspace", async () => {
+    const saved = storage();
+    saved.setItem("buzz.worktrees.install.v1", "install");
+    new BindingStore(saved).set({
+      bindingId: "binding",
+      channelId: "abcd0000-0000-0000-0000-000000000000",
+      repoRoot: "/repo",
+      worktreeRoot: "/broken-trees",
+      path: "/broken-trees/original-abcd",
+      branch: "buzz/original-abcd",
+      baseRef: "main",
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 1,
+      installId: "install",
+      owned: true,
+      state: "failed",
+    });
+    let added = false;
+    const spawn: NonNullable<Host["spawn"]> = vi.fn(
+      async (_id, options = {}) => {
+        const args = options.args ?? [];
+        let stdout = "";
+        if (args.includes("--version")) stdout = "git version 2.43.0\n";
+        else if (args.includes("worktree") && args.includes("list"))
+          stdout = `worktree /repo\0HEAD ${"a".repeat(40)}\0branch refs/heads/main\0\0${
+            added
+              ? `worktree /fixed-trees/fixed-workspace-abcd\0HEAD ${"a".repeat(40)}\0branch refs/heads/buzz/fixed-workspace-abcd\0\0`
+              : ""
+          }`;
+        else if (args.includes("worktree") && args.includes("add"))
+          added = true;
+        else if (args.at(-1) === "--git-common-dir") stdout = "/repo/.git\n";
+        else if (args.at(-1)?.endsWith("^{commit}"))
+          stdout = `${"a".repeat(40)}\n`;
+        options.onStdout?.(stdout);
+        return {
+          write: async () => {},
+          end: async () => {},
+          kill: async () => {},
+          exited: Promise.resolve(0),
+        };
+      },
+    );
+    const service = createWorktrees(
+      { spawn, resolveDirectory: async (path) => path },
+      saved,
+    );
+    await expect(
+      service.prepare(
+        "abcd0000-0000-0000-0000-000000000000",
+        {
+          folders: ["/repo"],
+          worktree: { location: "/fixed-trees", baseBranch: "develop" },
+          canvas: "",
+        },
+        "Fixed workspace",
+      ),
+    ).resolves.toMatchObject({
+      path: "/fixed-trees/fixed-workspace-abcd",
+      branch: "buzz/fixed-workspace-abcd",
+      baseRef: "develop",
+      state: "ready",
+    });
   });
 
   it("does not claim a multi-folder workspace can be prepared", () => {
