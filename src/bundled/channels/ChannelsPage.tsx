@@ -104,6 +104,8 @@ import { communityRefusalTitle } from "../../features/federated-identity/Communi
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
 import type { Worktrees } from "../worktrees/service";
+import { WorktreeStatusBar } from "../worktrees/WorktreeStatusBar";
+import { worktreeDiffTarget } from "../worktrees/panel";
 import {
   useChannelList,
   useChannelRoster,
@@ -2411,6 +2413,23 @@ function ChannelWorkspace({
           }
         />
       )}
+      {current &&
+        solo &&
+        worktrees &&
+        !current.archived &&
+        current.viewerRole !== "guest" &&
+        (!current.readOnly || current.cached) && (
+          <WorktreeStatusBar
+            channelId={current.id}
+            worktrees={worktrees}
+            openDiff={() =>
+              panels.requestOpen({
+                channelId: current.id,
+                target: worktreeDiffTarget(current.id),
+              })
+            }
+          />
+        )}
       {current &&
         !current.archived &&
         current.viewerRole !== "guest" &&

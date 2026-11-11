@@ -13,7 +13,7 @@ import styles from "./WorktreeDiffPanel.module.css";
 const targetPrefix = "buzz:worktree-diff:";
 const tabIcon = <GitBranchIcon size="1rem" />;
 
-function target(channelId: string) {
+export function worktreeDiffTarget(channelId: string) {
   return `${targetPrefix}${channelId}`;
 }
 
@@ -109,7 +109,10 @@ export function registerWorktreeDiff(ctx: Context, worktrees: Worktrees) {
     worktrees.has(channelId) ? (
       <MenuItem
         onClick={() =>
-          ctx.panels.requestOpen({ channelId, target: target(channelId) })
+          ctx.panels.requestOpen({
+            channelId,
+            target: worktreeDiffTarget(channelId),
+          })
         }
       >
         <MenuIcon>

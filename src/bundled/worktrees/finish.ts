@@ -18,7 +18,6 @@ type FinishBlockerKind =
   | "locked"
   | "missing"
   | "repository"
-  | "unpublished"
   | "usage"
   | "usage-unknown";
 
@@ -147,11 +146,23 @@ export async function previewWorkspaceFinish(
       options.signal,
     ),
   );
-  if (unpublishedCommits > 0)
+  const branchHead = trimSha(
+    await runGit(
+      spawn,
+      binding.repoRoot,
+      [
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        `refs/heads/${binding.branch}^{commit}`,
+      ],
+      options.signal,
+    ),
+  );
+  if (branchHead !== head.toLowerCase())
     blockers.push({
-      kind: "unpublished",
-      message: "Worktree has commits not found on a remote",
-      count: unpublishedCommits,
+      kind: "repository",
+      message: "Workspace branch no longer points to the previewed HEAD",
     });
 
   try {

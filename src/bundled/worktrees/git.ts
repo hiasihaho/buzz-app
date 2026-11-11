@@ -72,9 +72,7 @@ export async function runGit(
     const code = await process.exited;
     abort.throwIfAborted();
     if (outputTooLarge)
-      throw new GitOutputTooLarge(
-        `Git output exceeds ${maxOutputBytes} bytes`,
-      );
+      throw new GitOutputTooLarge(`Git output exceeds ${maxOutputBytes} bytes`);
     if (code === 0) return stdout;
     const reason = stderr.trim() || `git exited with code ${code ?? "unknown"}`;
     throw new GitError(reason, code, stderr);

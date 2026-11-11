@@ -38,6 +38,14 @@ function result(channelId = "alpha"): WorktreeDiff {
 function service(diff: Worktrees["diff"]): Worktrees {
   return {
     has: () => true,
+    summary: async () => ({
+      repository: "/repo",
+      path: "/trees/task",
+      branch: "buzz/task",
+      baseRef: "main",
+      status,
+      unpublishedCommits: 0,
+    }),
     diff,
     workspace: () => undefined,
     prepare: async () => undefined,

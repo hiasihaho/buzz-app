@@ -149,7 +149,8 @@ describe("worktree chat service", () => {
             `1 .M N... 100644 100644 100644 ${"1".repeat(40)} ${"2".repeat(40)} file.txt`,
             "",
           ].join("\0");
-        else if (args.includes("rev-list")) stdout = "0 0\n";
+        else if (args.includes("rev-list"))
+          stdout = args.includes("--left-right") ? "0 0\n" : "3\n";
         else if (args.includes("diff")) stdout = patch;
         else throw new Error(`Unexpected git call: ${args.join(" ")}`);
         options.onStdout?.(stdout);
@@ -166,6 +167,14 @@ describe("worktree chat service", () => {
       saved,
     );
     expect(service.has(binding.channelId)).toBe(true);
+    await expect(service.summary(binding.channelId)).resolves.toMatchObject({
+      repository: binding.repoRoot,
+      path: binding.path,
+      branch: binding.branch,
+      baseRef: binding.baseRef,
+      unpublishedCommits: 3,
+      status: { state: "ready", dirty: true, fileCount: 1 },
+    });
     await expect(service.diff(binding.channelId)).resolves.toMatchObject({
       content: patch,
       path: binding.path,

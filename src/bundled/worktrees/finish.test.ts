@@ -132,11 +132,11 @@ const available = async () => ({ agents: [], terminals: [] });
 const options = { installId: binding.installId, inspectUse: available };
 
 function safePreviewOutputs() {
-  return [listed(), "/repo/.git\n", status(), "0\n"];
+  return [listed(), "/repo/.git\n", status(), "0\n", `${sha}\n`];
 }
 
 describe("safe worktree finish", () => {
-  it("previews one owned clean worktree and uses strict ignored and unpublished checks", async () => {
+  it("previews one owned clean worktree and verifies its durable branch", async () => {
     const spawn = git(safePreviewOutputs());
     await expect(
       previewWorkspaceFinish(spawn, store(), binding.bindingId, options),
@@ -188,7 +188,34 @@ describe("safe worktree finish", () => {
         "--remotes",
         "--",
       ],
+      [
+        "--no-optional-locks",
+        "-C",
+        binding.repoRoot,
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        `refs/heads/${binding.branch}^{commit}`,
+      ],
     ]);
+  });
+
+  it("blocks removal when the durable branch no longer preserves the previewed HEAD", async () => {
+    const result = await previewWorkspaceFinish(
+      git([listed(), "/repo/.git\n", status(), "4\n", `${"d".repeat(40)}\n`]),
+      store(),
+      binding.bindingId,
+      options,
+    );
+    expect(result).toMatchObject({
+      unpublishedCommits: 4,
+      blockers: [
+        expect.objectContaining({
+          kind: "repository",
+          message: "Workspace branch no longer points to the previewed HEAD",
+        }),
+      ],
+    });
   });
 
   it("reports every destructive-work blocker without treating ignored files as clean", async () => {
@@ -202,6 +229,7 @@ describe("safe worktree finish", () => {
       "/other/.git\n",
       status(dirty),
       "2\n",
+      `${sha}\n`,
     ]);
     const result = await previewWorkspaceFinish(
       spawn,
@@ -218,7 +246,6 @@ describe("safe worktree finish", () => {
       expect.objectContaining({ kind: "repository" }),
       expect.objectContaining({ kind: "dirty", count: 2 }),
       expect.objectContaining({ kind: "ignored", count: 1 }),
-      expect.objectContaining({ kind: "unpublished", count: 2 }),
       expect.objectContaining({ kind: "usage", count: 2 }),
     ]);
   });
@@ -226,7 +253,13 @@ describe("safe worktree finish", () => {
   it("blocks detached, missing, foreign and unverifiable-use worktrees", async () => {
     await expect(
       previewWorkspaceFinish(
-        git([listed(binding, "detached"), "/repo/.git\n", status(), "0\n"]),
+        git([
+          listed(binding, "detached"),
+          "/repo/.git\n",
+          status(),
+          "0\n",
+          `${sha}\n`,
+        ]),
         store(),
         binding.bindingId,
         options,
@@ -477,7 +510,7 @@ describe("safe worktree finish", () => {
     ).rejects.toThrow(/abort/i);
   });
 
-  it("blocks ignored data and safely removes a real Git worktree without deleting its branch", async () => {
+  it("blocks ignored data but preserves unpublished real Git work on the retained branch", async () => {
     const created = await mkdtemp(join(tmpdir(), "buzz-worktree-finish-"));
     const root = await realpath(created);
     try {
@@ -503,6 +536,17 @@ describe("safe worktree finish", () => {
       run(repoRoot, ["remote", "add", "origin", remote]);
       run(repoRoot, ["push", "-qu", "origin", "main"]);
       run(repoRoot, ["worktree", "add", "-qb", "buzz/task", path, "main"]);
+      await writeFile(join(path, "local.txt"), "kept by branch\n");
+      run(path, ["add", "local.txt"]);
+      run(path, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "commit",
+        "-qm",
+        "local work",
+      ]);
       const head = run(path, ["rev-parse", "HEAD"]);
       const actual: WorkspaceBinding = {
         ...binding,
@@ -519,6 +563,7 @@ describe("safe worktree finish", () => {
         previewWorkspaceFinish(realSpawn(), saved, actual.bindingId, options),
       ).resolves.toMatchObject({
         head,
+        unpublishedCommits: 1,
         blockers: [expect.objectContaining({ kind: "ignored", count: 1 })],
       });
       await rm(join(path, ".env"));

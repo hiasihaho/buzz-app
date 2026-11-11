@@ -430,6 +430,21 @@ it("gives a chat-menu-opened local diff panel its originating chat context", asy
   }));
   const worktrees: Worktrees = {
     has: () => true,
+    summary: async () => ({
+      repository: "/repo",
+      path: "/trees/alpha",
+      branch: "buzz/alpha",
+      baseRef: "main",
+      status: {
+        state: "ready",
+        path: "/trees/alpha",
+        branch: "buzz/alpha",
+        detached: false,
+        dirty: false,
+        fileCount: 0,
+      },
+      unpublishedCommits: 0,
+    }),
     diff,
     workspace: () => undefined,
     prepare: async () => undefined,

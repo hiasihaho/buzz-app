@@ -22,6 +22,16 @@ export type WorktreeDiff = Readonly<{
   status: WorkspaceStatus;
 }>;
 
+export type WorktreeSummary = Readonly<{
+  repository: string;
+  path: string;
+  branch: string;
+  baseRef: string;
+  status: WorkspaceStatus;
+  /** Local evidence only: commits not reached by any local remote-tracking ref. */
+  unpublishedCommits?: number;
+}>;
+
 export type WorktreePreparation = Readonly<{
   workspace(value: Workspace): WorktreeWorkspace | undefined;
   prepare(
@@ -35,6 +45,7 @@ export type WorktreePreparation = Readonly<{
 export type Worktrees = WorktreePreparation &
   Readonly<{
     has(channelId: string): boolean;
+    summary(channelId: string, signal?: AbortSignal): Promise<WorktreeSummary>;
     diff(channelId: string, signal?: AbortSignal): Promise<WorktreeDiff>;
   }>;
 
@@ -90,24 +101,30 @@ export function createWorktrees(
       const binding = bindings.forChannel(channelId);
       return !!desktop && binding?.owned === true && binding.state === "ready";
     },
+    async summary(channelId, signal) {
+      if (!desktop) throw new Error("Local Git is unavailable");
+      await recovery;
+      const binding = readyBinding(bindings, channelId);
+      const status = await readyStatus(desktop.spawn, binding, signal);
+      const unpublishedCommits = await countUnpublished(
+        desktop.spawn,
+        binding.path,
+        signal,
+      );
+      return {
+        repository: binding.repoRoot,
+        path: binding.path,
+        branch: binding.branch,
+        baseRef: binding.baseRef,
+        status,
+        ...(unpublishedCommits !== undefined && { unpublishedCommits }),
+      };
+    },
     async diff(channelId, signal) {
       if (!desktop) throw new Error("Local Git is unavailable");
       await recovery;
-      const binding = bindings.forChannel(channelId);
-      if (!binding?.owned || binding.state !== "ready")
-        throw new Error("This chat has no ready local worktree");
-      const status = await reconcileWorkspaceStatus(
-        desktop.spawn,
-        binding,
-        signal,
-      );
-      if (status.state !== "ready" || status.detached)
-        throw new Error(
-          status.reason ??
-            (status.detached
-              ? "The local worktree is detached"
-              : "The local worktree no longer matches this chat"),
-        );
+      const binding = readyBinding(bindings, channelId);
+      const status = await readyStatus(desktop.spawn, binding, signal);
       const content = await runGit(
         desktop.spawn,
         binding.path,
@@ -164,6 +181,54 @@ export function createWorktrees(
       }
     },
   };
+}
+
+function readyBinding(
+  bindings: BindingStore,
+  channelId: string,
+): WorkspaceBinding {
+  const binding = bindings.forChannel(channelId);
+  if (!binding?.owned || binding.state !== "ready")
+    throw new Error("This chat has no ready local worktree");
+  return binding;
+}
+
+async function readyStatus(
+  spawn: NonNullable<Host["spawn"]>,
+  binding: WorkspaceBinding,
+  signal?: AbortSignal,
+): Promise<WorkspaceStatus> {
+  const status = await reconcileWorkspaceStatus(spawn, binding, signal);
+  if (status.state !== "ready" || status.detached)
+    throw new Error(
+      status.reason ??
+        (status.detached
+          ? "The local worktree is detached"
+          : "The local worktree no longer matches this chat"),
+    );
+  return status;
+}
+
+async function countUnpublished(
+  spawn: NonNullable<Host["spawn"]>,
+  path: string,
+  signal?: AbortSignal,
+): Promise<number | undefined> {
+  try {
+    const output = await runGit(
+      spawn,
+      path,
+      ["rev-list", "--count", "HEAD", "--not", "--remotes", "--"],
+      signal,
+    );
+    const value = output.trim();
+    if (!/^\d+$/.test(value)) return undefined;
+    const count = Number(value);
+    return Number.isSafeInteger(count) ? count : undefined;
+  } catch {
+    signal?.throwIfAborted();
+    return undefined;
+  }
 }
 
 function workspace(value: Workspace): WorktreeWorkspace | undefined {
