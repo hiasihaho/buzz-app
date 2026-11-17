@@ -147,12 +147,7 @@ export function reopenedWorkspaceCanvas<T extends WorkspaceCanvasBinding>(
   binding: T,
 ): string {
   if (hasWorkspaceBlock(content, binding.path)) return content;
-  const notice = removedWorkspaceNotice(binding.branch);
-  const authored = content.startsWith(`${notice}\n\n`)
-    ? content.slice(notice.length + 2)
-    : content === notice
-      ? ""
-      : content;
+  const authored = withoutRemovedWorkspaceNotice(content);
   return preparedWorkspaceCanvas(
     { folders: [binding.repoRoot], canvas: authored },
     binding,
@@ -185,6 +180,23 @@ function removedWorkspaceNotice(branch: string): string {
     `The local worktree was removed. Branch \`${branch}\` and its commits remain in the repository.`,
     "Do not create another worktree yourself. If more work is needed, ask the user to choose Recreate worktree.",
   ].join("\n");
+}
+
+function withoutRemovedWorkspaceNotice(content: string): string {
+  const heading = "## Worktree removed\n\n";
+  if (!content.startsWith(heading)) return content;
+  const paragraphEnd = content.indexOf("\n\n", heading.length);
+  const notice = content.slice(
+    heading.length,
+    paragraphEnd < 0 ? content.length : paragraphEnd,
+  );
+  const firstLine = notice.split("\n", 1)[0] ?? "";
+  if (
+    !firstLine.startsWith("The local worktree was removed. Branch `") ||
+    !firstLine.endsWith("` and its commits remain in the repository.")
+  )
+    return content;
+  return paragraphEnd < 0 ? "" : content.slice(paragraphEnd + 2);
 }
 
 export function createWorktrees(
@@ -315,8 +327,8 @@ export function createWorktrees(
       if (!desktop) throw new Error("Local Git is unavailable");
       await recovery;
       const binding = ownedChannelBinding(bindings, channelId);
-      if (binding.state !== "removed")
-        throw new Error("This chat has no removed local worktree");
+      if (binding.state !== "removed" && binding.state !== "preparing")
+        throw new Error("This chat has no recoverable local worktree");
       return prepareWorkspace(
         desktop,
         bindings,

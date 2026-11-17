@@ -1,5 +1,12 @@
 import { spawn as spawnProcess, spawnSync } from "node:child_process";
-import { access, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Host, HostProcessOptions } from "../../features/host/service";
@@ -380,6 +387,107 @@ describe("prepareWorkspace", () => {
       "/trees/task",
       "buzz/task",
     ]);
+  });
+
+  it("rejects a foreign registered worktree at a removed binding path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "buzz-worktree-foreign-"));
+    try {
+      const repoRoot = join(root, "repo");
+      const worktreeRoot = join(root, "trees");
+      const worktreePath = join(worktreeRoot, "task");
+      await mkdir(repoRoot);
+      spawnSync("git", ["init", "-q", "-b", "main", repoRoot], {
+        stdio: "inherit",
+      });
+      spawnSync(
+        "git",
+        [
+          "-C",
+          repoRoot,
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.org",
+          "commit",
+          "--allow-empty",
+          "-qm",
+          "base",
+        ],
+        { stdio: "inherit" },
+      );
+      const store = new BindingStore(memory());
+      const realInput = {
+        ...input,
+        repoRoot,
+        worktreeRoot,
+        baseRef: "main",
+      };
+      const binding = await prepareWorkspace(
+        realHost(),
+        store,
+        realInput,
+        options,
+      );
+      spawnSync("git", ["-C", repoRoot, "worktree", "remove", worktreePath], {
+        stdio: "inherit",
+      });
+      const removed = { ...binding, state: "removed" as const };
+      store.set(removed);
+      spawnSync(
+        "git",
+        ["-C", repoRoot, "worktree", "add", "-q", worktreePath, input.branch],
+        { stdio: "inherit" },
+      );
+      await writeFile(join(worktreePath, "foreign.txt"), "keep me\n");
+
+      await expect(
+        prepareWorkspace(realHost(), store, realInput, options),
+      ).rejects.toThrow("already registered as a worktree");
+      expect(store.forChannel(input.channelId)).toEqual(removed);
+      await expect(access(join(worktreePath, "foreign.txt"))).resolves.toBe(
+        undefined,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("resumes an interrupted preparing binding and keeps it retryable on failure", async () => {
+    const store = new BindingStore(memory());
+    const preparing: WorkspaceBinding = {
+      bindingId: "binding-1",
+      channelId: input.channelId,
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task",
+      branch: input.branch,
+      baseRef: input.baseRef,
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 10,
+      installId: input.installId,
+      owned: true,
+      state: "preparing",
+    };
+    store.set(preparing);
+    await expect(
+      prepareWorkspace(
+        fixture({ existingBranch: true, addFails: true }).host,
+        store,
+        input,
+        options,
+      ),
+    ).rejects.toThrow("add failed");
+    expect(store.forChannel(input.channelId)).toEqual(preparing);
+
+    await expect(
+      prepareWorkspace(
+        fixture({ existing: true, existingBranch: true }).host,
+        store,
+        input,
+        options,
+      ),
+    ).resolves.toMatchObject({ state: "ready", bindingId: "binding-1" });
   });
 
   it("keeps a removed binding retryable when reopening fails", async () => {

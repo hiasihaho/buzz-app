@@ -117,7 +117,7 @@ export async function prepareWorkspace(
     state: "preparing",
   };
   let worktree = await findWorktree(host, preparing, options.signal);
-  if (!sameExistingIntent && worktree)
+  if (worktree && (!sameExistingIntent || existing.state === "removed"))
     throw new Error("Workspace path is already registered as a worktree");
   if (sameExistingIntent)
     worktree = await recoverPrunableWorktree(
@@ -129,7 +129,8 @@ export async function prepareWorkspace(
   if (!worktree) {
     if (sameExistingIntent && existing.state === "removed")
       await assertBranchExists(host, preparing, options.signal);
-    else await assertBranchAtBase(host, preparing, options.signal);
+    else if (!(sameExistingIntent && existing.state === "preparing"))
+      await assertBranchAtBase(host, preparing, options.signal);
   }
   bindings.set(preparing);
 
@@ -146,7 +147,8 @@ export async function prepareWorkspace(
     return ready;
   } catch (error) {
     bindings.set(
-      sameExistingIntent && existing.state === "removed"
+      sameExistingIntent &&
+        (existing.state === "removed" || existing.state === "preparing")
         ? existing
         : { ...preparing, state: "failed" },
     );

@@ -142,12 +142,12 @@ export function WorktreeStatusBar({
   const [canvasError, setCanvasError] = useState("");
   const cancel = useRef<HTMLButtonElement>(null);
   const request = useRef<AbortController | undefined>(undefined);
+  const reopening = useRef(false);
   const refresh = useCallback(() => {
     request.current?.abort();
-    setOperationError("");
     refreshWorktreeDiff(channelId);
     if (!available) {
-      setBusy(false);
+      if (!reopening.current) setBusy(false);
       return;
     }
     const controller = new AbortController();
@@ -165,7 +165,8 @@ export function WorktreeStatusBar({
         setStored({ channelId, status: "ready", summary });
         if (summary.lifecycle === "removed")
           refreshWorktreeDiff(channelId, true);
-        if (request.current === controller) setBusy(false);
+        if (request.current === controller && !reopening.current)
+          setBusy(false);
       },
       (reason: unknown) => {
         if (controller.signal.aborted) return;
@@ -177,7 +178,8 @@ export function WorktreeStatusBar({
             ? { summary: current.summary }
             : {}),
         }));
-        if (request.current === controller) setBusy(false);
+        if (request.current === controller && !reopening.current)
+          setBusy(false);
       },
     );
   }, [available, channelId, worktrees]);
@@ -274,6 +276,8 @@ export function WorktreeStatusBar({
       ? stored.summary
       : undefined;
   const removed = currentSummary?.lifecycle === "removed";
+  const preparing = currentSummary?.lifecycle === "preparing";
+  const ready = currentSummary?.lifecycle === "ready";
   removedSummary.current = removed ? currentSummary : undefined;
   useEffect(() => {
     const workspace = removedSummary.current;
@@ -284,6 +288,17 @@ export function WorktreeStatusBar({
       ),
     );
   }, [removed, updateCanvas]);
+  const readySummary = useRef<WorktreeSummary | undefined>(undefined);
+  readySummary.current = ready ? currentSummary : undefined;
+  useEffect(() => {
+    const workspace = readySummary.current;
+    if (!ready || !workspace) return;
+    void restoreCanvas(workspace).catch((reason) =>
+      setCanvasError(
+        `Worktree ready, but Canvas could not be updated: ${message(reason)}`,
+      ),
+    );
+  }, [ready, restoreCanvas]);
 
   if (!available) return null;
   const state: State =
@@ -293,7 +308,6 @@ export function WorktreeStatusBar({
   const ahead = summary?.status?.ahead;
   const unpublished = summary?.unpublishedCommits;
   const changed = summary?.status?.dirty;
-  const ready = summary?.lifecycle === "ready";
   const recovery = summary?.lifecycle === "removing";
   const statusLabel =
     state.status === "loading"
@@ -341,6 +355,8 @@ export function WorktreeStatusBar({
     }
   };
   const reopen = async () => {
+    if (reopening.current) return;
+    reopening.current = true;
     setBusy(true);
     setOperationError("");
     try {
@@ -355,6 +371,8 @@ export function WorktreeStatusBar({
       refresh();
     } catch (reason) {
       setOperationError(message(reason));
+    } finally {
+      reopening.current = false;
       setBusy(false);
     }
   };
@@ -399,11 +417,13 @@ export function WorktreeStatusBar({
         </div>
         <div className={styles.actions}>
           {errorMessage && <ErrorPopover message={errorMessage} />}
-          {removed ? (
+          {removed || preparing ? (
             <>
               <span className={styles.state} role="status">
                 <span className={styles.statusText}>
-                  Worktree removed; branch {summary?.branch} remains
+                  {removed
+                    ? `Worktree removed; branch ${summary?.branch} remains`
+                    : "Worktree setup was interrupted"}
                 </span>
               </span>
               <Button

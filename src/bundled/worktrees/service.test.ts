@@ -148,6 +148,38 @@ describe("worktree chat service", () => {
     expect(reopened.endsWith(authored)).toBe(true);
   });
 
+  it.each([
+    [
+      "the original one-line notice",
+      "## Worktree removed\n\nThe local worktree was removed. Branch `buzz/task-abcd` and its commits remain in the repository.\n\nAuthored",
+    ],
+    [
+      "the earlier new-chat notice",
+      "## Worktree removed\n\nThe local worktree was removed. Branch `buzz/task-abcd` and its commits remain in the repository.\nDo not create another worktree in this chat. If more work is needed, tell the user to start a new chat.\n\nAuthored",
+    ],
+  ])("reopens Canvas after %s", (_label, content) => {
+    const binding: WorkspaceBinding = {
+      bindingId: "binding",
+      channelId: "channel",
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task-abcd",
+      branch: "buzz/task-abcd",
+      baseRef: "main",
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 1,
+      installId: "install",
+      owned: true,
+      state: "ready",
+    };
+    const reopened = reopenedWorkspaceCanvas(content, binding);
+    expect(reopened).toContain(binding.path);
+    expect(reopened).not.toContain("## Worktree removed");
+    expect(reopened).not.toContain("start a new chat");
+    expect(reopened.endsWith("Authored")).toBe(true);
+  });
+
   it("exposes one configured repository only when desktop Git is available", () => {
     expect(createWorktrees({}, storage()).workspace(workspace)).toBeUndefined();
     expect(
@@ -620,6 +652,15 @@ describe("worktree chat service", () => {
       expect(run(repoRoot, ["rev-parse", `refs/heads/${binding.branch}`])).toBe(
         head,
       );
+      run(repoRoot, ["branch", "-D", binding.branch]);
+      await expect(service.reopen(binding.channelId)).rejects.toThrow(
+        "saved workspace branch no longer exists",
+      );
+      expect(new BindingStore(saved).forChannel(binding.channelId)?.state).toBe(
+        "removed",
+      );
+      run(repoRoot, ["branch", binding.branch, head]);
+      new BindingStore(saved).set({ ...binding, state: "preparing" });
       await expect(service.reopen(binding.channelId)).resolves.toMatchObject({
         state: "ready",
         path,

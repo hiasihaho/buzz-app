@@ -630,16 +630,18 @@ it("shows removing and reopens removed lifecycle states", async () => {
     reopenedBinding,
   );
   const removed = removedWorkspaceCanvas(prepared, reopenedBinding);
-  const save = vi.fn(async (_channelId: string, _content: string) => ({
-    id: "saved",
-  }));
+  let canvasContent = removed;
+  const save = vi.fn(async (_channelId: string, content: string) => {
+    canvasContent = content;
+    return { id: "saved" };
+  });
   const props = {
     worktrees: trees,
     openDiff: () => {},
     agentWorking: false,
     session,
     canvas: {
-      read: vi.fn(async () => ({ id: "canvas-head", content: removed })),
+      read: vi.fn(async () => ({ id: "canvas-head", content: canvasContent })),
       save,
     } as never,
   };
@@ -662,6 +664,77 @@ it("shows removing and reopens removed lifecycle states", async () => {
   expect(save.mock.calls[0]?.[1]).toContain("## Prepared worktree");
   expect(save.mock.calls[0]?.[1]).toContain("Authored");
   expect(save.mock.calls[0]?.[1]).not.toContain("## Worktree removed");
+});
+
+it("offers to resume an interrupted worktree setup", async () => {
+  const user = userEvent.setup();
+  const reopen = vi.fn(async () => ({ state: "ready" }) as never);
+  render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(async () => summaryForLifecycle("preparing"), true, {
+        reopen,
+      })}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={canvas}
+    />,
+  );
+
+  expect(
+    await screen.findByText("Worktree setup was interrupted"),
+  ).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Recreate worktree" }));
+  expect(reopen).toHaveBeenCalledWith("channel");
+});
+
+it("repairs a stale removed-worktree Canvas when a ready chat opens", async () => {
+  const binding = {
+    bindingId: "binding",
+    channelId: "channel",
+    repoRoot: summary.repository,
+    worktreeRoot: "/trees",
+    path: summary.path,
+    branch: summary.branch,
+    baseRef: summary.baseRef,
+    baseSha: summary.baseSha,
+    gitCommonDir: "/repo/.git",
+    createdAt: 1,
+    installId: "install",
+    owned: true,
+    state: "ready" as const,
+  };
+  const prepared = preparedWorkspaceCanvas(
+    { folders: [summary.repository], canvas: "Authored" },
+    binding,
+  );
+  let content = removedWorkspaceCanvas(prepared, binding);
+  const save = vi.fn(async (_channelId: string, next: string) => {
+    content = next;
+    return { id: "saved" };
+  });
+  render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(async () => summaryForLifecycle("ready"))}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={
+        {
+          read: vi.fn(async () => ({ id: "canvas-head", content })),
+          save,
+        } as never
+      }
+    />,
+  );
+
+  await screen.findByText("buzz/example-task");
+  await waitFor(() => expect(save).toHaveBeenCalledOnce());
+  expect(content).toContain("## Prepared worktree");
+  expect(content).not.toContain("## Worktree removed");
+  expect(content.endsWith("Authored")).toBe(true);
 });
 
 it("keeps a Canvas write failure visible and retries it", async () => {
