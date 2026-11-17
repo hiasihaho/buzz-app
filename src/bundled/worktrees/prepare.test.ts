@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Host, HostProcessOptions } from "../../features/host/service";
 import { describe, expect, it, vi } from "vitest";
 import { BindingStore, type WorkspaceBinding } from "./binding";
+import { GitError } from "./git";
 import { prepareWorkspace } from "./prepare";
 
 function memory() {
@@ -36,6 +37,7 @@ function fixture(
     prunable?: boolean;
     resolvedWorktreePath?: string;
     invalidRepo?: boolean;
+    repositoryError?: string;
     missingBase?: boolean;
   } = {},
 ) {
@@ -51,14 +53,14 @@ function fixture(
       let stdout = "";
       let stderr = "";
       let code = 0;
-      if (
-        gitArgs[0] === "rev-parse" &&
-        gitArgs.includes("--is-inside-work-tree")
-      ) {
+      if (gitArgs[0] === "rev-parse" && gitArgs.includes("--git-dir")) {
         if (options.invalidRepo) {
           stderr = "fatal: not a git repository";
           code = 128;
-        } else stdout = "true\n";
+        } else if (options.repositoryError) {
+          stderr = options.repositoryError;
+          code = 128;
+        } else stdout = "/repo/.git\n";
       } else if (
         gitArgs[0] === "rev-parse" &&
         gitArgs.at(-1) === "origin/main^{commit}" &&
@@ -123,6 +125,7 @@ function fixture(
     },
   );
   const resolveDirectory = vi.fn(async (path: string) => {
+    if (path === "~") return "/home/test";
     if (path === "/repo-link") return "/repo";
     if (path === "/trees-link") return "/trees";
     if (path === "/trees/task" && options.resolvedWorktreePath)
@@ -422,6 +425,100 @@ describe("prepareWorkspace", () => {
     );
     expect(host.resolveDirectory).not.toHaveBeenCalledWith("/trees/task");
     expect(store.forChannel(input.channelId)).toBeUndefined();
+  });
+
+  it("creates a worktree from a bare repository", async () => {
+    const root = await mkdtemp(join(tmpdir(), "buzz-worktree-bare-"));
+    try {
+      const seed = join(root, "seed");
+      const repoRoot = join(root, "repo.git");
+      const worktreeRoot = join(root, "trees");
+      spawnSync("git", ["init", "-q", "-b", "main", seed], {
+        stdio: "inherit",
+      });
+      spawnSync(
+        "git",
+        [
+          "-C",
+          seed,
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.org",
+          "commit",
+          "--allow-empty",
+          "-qm",
+          "base",
+        ],
+        { stdio: "inherit" },
+      );
+      spawnSync("git", ["clone", "-q", "--bare", seed, repoRoot], {
+        stdio: "inherit",
+      });
+
+      await expect(
+        prepareWorkspace(
+          realHost(),
+          new BindingStore(memory()),
+          { ...input, repoRoot, worktreeRoot, baseRef: "main" },
+          options,
+        ),
+      ).resolves.toMatchObject({
+        repoRoot,
+        path: join(worktreeRoot, "task"),
+        state: "ready",
+      });
+      await expect(access(join(worktreeRoot, "task", ".git"))).resolves.toBe(
+        undefined,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("expands a tilde-prefixed repository before invoking Git", async () => {
+    const { host } = fixture();
+
+    await prepareWorkspace(
+      host,
+      new BindingStore(memory()),
+      { ...input, repoRoot: "~/repo" },
+      options,
+    );
+
+    expect(host.resolveDirectory).toHaveBeenCalledWith("~");
+    expect(host.spawn).toHaveBeenCalledWith(
+      "git",
+      expect.objectContaining({
+        args: [
+          "--no-optional-locks",
+          "-C",
+          "/home/test/repo",
+          "rev-parse",
+          "--git-dir",
+        ],
+      }),
+    );
+  });
+
+  it("preserves repository access errors from Git", async () => {
+    const { host } = fixture({
+      repositoryError:
+        "fatal: detected dubious ownership in repository at '/repo-link'",
+    });
+
+    const error = await prepareWorkspace(
+      host,
+      new BindingStore(memory()),
+      input,
+      options,
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GitError);
+    expect(error).toHaveProperty(
+      "message",
+      "fatal: detected dubious ownership in repository at '/repo-link'",
+    );
   });
 
   it("explains a missing base branch without creating the worktree leaf", async () => {

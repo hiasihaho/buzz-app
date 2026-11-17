@@ -165,17 +165,12 @@ async function assertGitRepository(
   signal?: AbortSignal,
 ): Promise<void> {
   try {
-    const inside = trimLine(
-      await runGit(
-        host.spawn,
-        repoPath,
-        ["rev-parse", "--is-inside-work-tree"],
-        signal,
-      ),
-    );
-    if (inside !== "true") throw new GitError("not a work tree", 128, "");
+    await runGit(host.spawn, repoPath, ["rev-parse", "--git-dir"], signal);
   } catch (error) {
-    if (error instanceof GitError)
+    if (
+      error instanceof GitError &&
+      /not a git repository|cannot change to/i.test(error.stderr)
+    )
       throw new Error(
         `Workspace folder "${configuredPath}" is not a Git repository. Choose a Git repository in Workspace settings.`,
       );
