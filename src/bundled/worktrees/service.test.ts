@@ -180,6 +180,31 @@ describe("worktree chat service", () => {
     expect(reopened.endsWith("Authored")).toBe(true);
   });
 
+  it("leaves a ready Canvas alone when it has no removal notice", () => {
+    const binding: WorkspaceBinding = {
+      bindingId: "binding",
+      channelId: "channel",
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task-abcd",
+      branch: "buzz/task-abcd",
+      baseRef: "main",
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 1,
+      installId: "install",
+      owned: true,
+      state: "ready",
+    };
+    const content = preparedWorkspaceCanvas(
+      { ...workspace, canvas: "Authored" },
+      { ...binding, path: "/trees/other-task" },
+    );
+
+    expect(reopenedWorkspaceCanvas("Authored", binding)).toBe("Authored");
+    expect(reopenedWorkspaceCanvas(content, binding)).toBe(content);
+  });
+
   it("exposes one configured repository only when desktop Git is available", () => {
     expect(createWorktrees({}, storage()).workspace(workspace)).toBeUndefined();
     expect(

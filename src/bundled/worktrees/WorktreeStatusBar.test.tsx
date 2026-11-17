@@ -737,6 +737,33 @@ it("repairs a stale removed-worktree Canvas when a ready chat opens", async () =
   expect(content.endsWith("Authored")).toBe(true);
 });
 
+it("does not warn when a ready Canvas cannot be read in the background", async () => {
+  const read = vi.fn(async () => {
+    throw new Error("Relay is disconnected");
+  });
+  const save = vi.fn();
+  render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(async () => summaryForLifecycle("ready"))}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={{ read, save } as never}
+    />,
+  );
+
+  await screen.findByText("buzz/example-task");
+  await waitFor(() => expect(read).toHaveBeenCalledOnce());
+  expect(save).not.toHaveBeenCalled();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", {
+      name: "Local worktree needs attention; show reason",
+    }),
+  ).not.toBeInTheDocument();
+});
+
 it("keeps a Canvas write failure visible and retries it", async () => {
   const user = userEvent.setup();
   const prepared = preparedWorkspaceCanvas(

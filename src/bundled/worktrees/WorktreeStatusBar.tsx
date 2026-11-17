@@ -232,8 +232,14 @@ export function WorktreeStatusBar({
     [canvas, channelId],
   );
   const restoreCanvas = useCallback(
-    async (workspace: CanvasWorkspace) => {
-      const head = await canvas.read(channelId);
+    async (workspace: CanvasWorkspace, ignoreReadError = false) => {
+      let head: Awaited<ReturnType<ChannelCanvas["read"]>>;
+      try {
+        head = await canvas.read(channelId);
+      } catch (reason) {
+        if (ignoreReadError) return;
+        throw reason;
+      }
       if (!head) {
         setCanvasError("");
         return;
@@ -293,7 +299,7 @@ export function WorktreeStatusBar({
   useEffect(() => {
     const workspace = readySummary.current;
     if (!ready || !workspace) return;
-    void restoreCanvas(workspace).catch((reason) =>
+    void restoreCanvas(workspace, true).catch((reason) =>
       setCanvasError(
         `Worktree ready, but Canvas could not be updated: ${message(reason)}`,
       ),

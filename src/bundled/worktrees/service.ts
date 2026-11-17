@@ -148,6 +148,7 @@ export function reopenedWorkspaceCanvas<T extends WorkspaceCanvasBinding>(
 ): string {
   if (hasWorkspaceBlock(content, binding.path)) return content;
   const authored = withoutRemovedWorkspaceNotice(content);
+  if (authored === content) return content;
   return preparedWorkspaceCanvas(
     { folders: [binding.repoRoot], canvas: authored },
     binding,
