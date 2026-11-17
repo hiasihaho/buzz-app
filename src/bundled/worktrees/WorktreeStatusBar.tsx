@@ -263,6 +263,7 @@ export function WorktreeStatusBar({
         await canvas.save(channelId, content, head.id, {
           preserveApproval: true,
         });
+      else if (options.onlyIfRemovedNotice) return;
       setCanvasError("");
     },
     [canvas, channelId],

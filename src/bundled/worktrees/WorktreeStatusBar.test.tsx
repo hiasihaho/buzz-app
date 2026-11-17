@@ -717,6 +717,86 @@ it("restores worktree instructions on recreate when Canvas has no removal notice
   expect(canvasContent.endsWith("Authored")).toBe(true);
 });
 
+it("keeps a recreate Canvas failure visible after the chat becomes ready", async () => {
+  const user = userEvent.setup();
+  const reopenedBinding = {
+    ...summaryForLifecycle("ready"),
+    repoRoot: summary.repository,
+    worktreeRoot: "/trees",
+    gitCommonDir: "/repo/.git",
+    bindingId: "binding",
+    channelId: "channel",
+    createdAt: 1,
+    installId: "install",
+    owned: true,
+    state: "ready" as const,
+  };
+  let reopened = false;
+  const reopen = vi.fn(async () => {
+    reopened = true;
+    return reopenedBinding as never;
+  });
+  const save = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("relay rejected save"))
+    .mockResolvedValueOnce({ id: "saved" });
+  render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(
+        async () => summaryForLifecycle(reopened ? "ready" : "removed"),
+        true,
+        { reopen },
+      )}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={
+        {
+          read: vi.fn(async () => ({ id: "canvas-head", content: "Authored" })),
+          save,
+        } as never
+      }
+    />,
+  );
+
+  await user.click(
+    await screen.findByRole("button", { name: "Recreate worktree" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "relay rejected save",
+  );
+  expect(await screen.findByText("Clean")).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Retry Canvas update" }),
+  ).toBeVisible();
+  expect(save).toHaveBeenCalledOnce();
+
+  await user.click(screen.getByRole("button", { name: "Retry Canvas update" }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(save.mock.calls[1]?.[1]).toContain(reopenedBinding.path);
+});
+
+it("does not save an unchanged Canvas when a ready chat opens", async () => {
+  const read = vi.fn(async () => ({ id: "canvas-head", content: "Authored" }));
+  const save = vi.fn();
+  render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(async () => summaryForLifecycle("ready"))}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={{ read, save } as never}
+    />,
+  );
+
+  await screen.findByText("buzz/example-task");
+  await waitFor(() => expect(read).toHaveBeenCalledOnce());
+  expect(save).not.toHaveBeenCalled();
+});
+
 it("offers to resume an interrupted worktree setup", async () => {
   const user = userEvent.setup();
   const reopen = vi.fn(async () => ({ state: "ready" }) as never);
