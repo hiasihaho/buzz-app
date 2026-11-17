@@ -133,6 +133,9 @@ describe("worktree chat service", () => {
     expect(removed).toContain(
       `Branch \`${binding.branch}\` and its commits remain`,
     );
+    expect(removed).toContain(
+      "Do not create another worktree in this chat. If more work is needed, tell the user to start a new chat.",
+    );
     expect(removed.endsWith(authored)).toBe(true);
   });
 

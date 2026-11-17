@@ -134,6 +134,7 @@ export function removedWorkspaceCanvas(
     "## Worktree removed",
     "",
     `The local worktree was removed. Branch \`${binding.branch}\` and its commits remain in the repository.`,
+    "Do not create another worktree in this chat. If more work is needed, tell the user to start a new chat.",
   ].join("\n");
   const remainder = `${before}${after}`;
   return remainder ? `${retained}\n\n${remainder}` : retained;
