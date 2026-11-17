@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { Panel, PanelProps } from "../../features/panels/service";
 import type { ChatMenuProps } from "../../features/conversation/service";
 import type { WorktreeDiff, Worktrees } from "./service";
-import { registerWorktreeDiff, WorktreeDiffPanel } from "./panel";
+import {
+  refreshWorktreeDiff,
+  registerWorktreeDiff,
+  WorktreeDiffPanel,
+} from "./panel";
+
+afterEach(cleanup);
 
 const status = {
   state: "ready" as const,
@@ -119,6 +125,50 @@ it("renders the bound local diff and a truthful clean or untracked empty state",
   ).toBeVisible();
 });
 
+it("refreshes in place while keeping the last diff visible", async () => {
+  let resolveRefresh!: (value: WorktreeDiff) => void;
+  const refresh = new Promise<WorktreeDiff>((resolve) => {
+    resolveRefresh = resolve;
+  });
+  const diff = vi
+    .fn<Worktrees["diff"]>()
+    .mockResolvedValueOnce(result("alpha"))
+    .mockReturnValueOnce(refresh);
+  render(<WorktreeDiffPanel {...props("alpha")} worktrees={service(diff)} />);
+  expect(await screen.findByText("buzz/alpha")).toBeVisible();
+
+  act(() => refreshWorktreeDiff("alpha"));
+  await waitFor(() => expect(diff).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("region", { name: "alpha.txt" })).toBeVisible();
+  expect(screen.queryByText("Loading local changes…")).not.toBeInTheDocument();
+
+  act(() => resolveRefresh(result("updated")));
+  expect(await screen.findByText("buzz/updated")).toBeVisible();
+});
+
+it("invalidates a removed worktree instead of retaining a stale clean claim", async () => {
+  const diff = vi
+    .fn<Worktrees["diff"]>()
+    .mockResolvedValueOnce({
+      ...result("alpha"),
+      content: "",
+      status: { ...status, dirty: false, fileCount: 0 },
+    })
+    .mockRejectedValueOnce(new Error("This chat has no ready local worktree"));
+  render(<WorktreeDiffPanel {...props("alpha")} worktrees={service(diff)} />);
+  expect(
+    await screen.findByText("The local worktree has no changes."),
+  ).toBeVisible();
+
+  act(() => refreshWorktreeDiff("alpha", true));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This chat has no ready local worktree",
+  );
+  expect(
+    screen.queryByText("The local worktree has no changes."),
+  ).not.toBeInTheDocument();
+});
+
 it("reports reconciliation failures and never paints a stale channel response", async () => {
   let resolveAlpha!: (value: WorktreeDiff) => void;
   let resolveBeta!: (value: WorktreeDiff) => void;
@@ -157,13 +207,14 @@ it("reports reconciliation failures and never paints a stale channel response", 
   expect(screen.queryByText("buzz/beta")).not.toBeInTheDocument();
 });
 
-it("registers a side panel and opens it from the chat menu only for a local binding", () => {
+it("registers a side panel and refreshes an open panel from the chat menu", async () => {
   let panel!: Panel;
   let menu!: (props: ChatMenuProps) => ReactElement | null;
   const requestOpen = vi.fn(() => true);
   const available = new Set(["alpha"]);
+  const diff = vi.fn(async () => result());
   const worktrees: Worktrees = {
-    ...service(vi.fn(async () => result())),
+    ...service(diff),
     has: (channelId) => available.has(channelId),
     canDiff: (channelId) => available.has(channelId),
   };
@@ -191,10 +242,13 @@ it("registers a side panel and opens it from the chat menu only for a local bind
   expect(
     panel.channelMenu?.eligible({ id: "alpha" } as never, {} as never),
   ).toBe(true);
+  render(<WorktreeDiffPanel {...props("alpha")} worktrees={worktrees} />);
+  await screen.findByText("buzz/alpha");
   const item = menu({ channelId: "alpha" } as ChatMenuProps) as ReactElement<{
     onClick(): void;
   }>;
-  item.props.onClick();
+  act(() => item.props.onClick());
+  await waitFor(() => expect(diff).toHaveBeenCalledTimes(2));
   expect(requestOpen).toHaveBeenCalledWith({
     channelId: "alpha",
     target: "buzz:worktree-diff:alpha",

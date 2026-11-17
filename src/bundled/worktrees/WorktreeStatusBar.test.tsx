@@ -10,6 +10,7 @@ import {
   type WorktreeSummary,
   type Worktrees,
 } from "./service";
+import { WorktreeDiffPanel } from "./panel";
 import { WorktreeStatusBar } from "./WorktreeStatusBar";
 
 vi.mock("../../shared/clipboard", () => ({
@@ -209,9 +210,29 @@ it("shows blocker paths and withholds destructive confirmation", async () => {
   );
 });
 
-it("removes the exact previewed HEAD and updates Canvas", async () => {
+it("removes the exact previewed HEAD, updates Canvas, and invalidates an open diff", async () => {
   const user = userEvent.setup();
-  const remove = vi.fn(async () => ({ state: "removed" as const }) as never);
+  let removed = false;
+  const remove = vi.fn(async () => {
+    removed = true;
+    return { state: "removed" as const } as never;
+  });
+  const trees = service(
+    async () => (removed ? summaryForLifecycle("removed") : summary),
+    true,
+    {
+      remove,
+      diff: async () => {
+        if (removed) throw new Error("This chat has no ready local worktree");
+        return {
+          content: "",
+          path: summary.path,
+          branch: summary.branch,
+          status: { ...readyStatus, dirty: false, fileCount: 0 },
+        };
+      },
+    },
+  );
   const prepared = preparedWorkspaceCanvas(
     { folders: ["/repo"], canvas: "Keep this authored text." },
     {
@@ -235,16 +256,31 @@ it("removes the exact previewed HEAD and updates Canvas", async () => {
     save: vi.fn(async () => ({ id: "saved" })),
   } as never;
   render(
-    <WorktreeStatusBar
-      channelId="channel"
-      worktrees={service(undefined, true, { remove })}
-      openDiff={() => {}}
-      agentWorking={false}
-      session={session}
-      canvas={canvasFixture}
-    />,
+    <>
+      <WorktreeStatusBar
+        channelId="channel"
+        worktrees={trees}
+        openDiff={() => {}}
+        agentWorking={false}
+        session={session}
+        canvas={canvasFixture}
+      />
+      <WorktreeDiffPanel
+        channelContext={{
+          scope: "scope",
+          channelId: "channel",
+          channelName: "channel",
+          viewer: "viewer",
+          relayUrl: "https://relay.example",
+        }}
+        worktrees={trees}
+      />
+    </>,
   );
-  await screen.findByText("buzz/example-task");
+  expect(await screen.findAllByText("buzz/example-task")).toHaveLength(2);
+  expect(
+    await screen.findByText("The local worktree has no changes."),
+  ).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Finish" }));
   await user.click(
     await screen.findByRole("button", { name: "Remove worktree" }),
@@ -253,6 +289,12 @@ it("removes the exact previewed HEAD and updates Canvas", async () => {
   await waitFor(() =>
     expect(remove).toHaveBeenCalledWith("channel", head, expect.any(Function)),
   );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This chat has no ready local worktree",
+  );
+  expect(
+    screen.queryByText("The local worktree has no changes."),
+  ).not.toBeInTheDocument();
   expect(
     (canvasFixture as { save: ReturnType<typeof vi.fn> }).save,
   ).toHaveBeenCalledWith(
@@ -380,42 +422,59 @@ it("refreshes on focus without replacing the last summary", async () => {
   await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
 });
 
-it("refreshes when agent work ends", async () => {
+it("refreshes the status and an open diff when agent work ends", async () => {
   const load = vi.fn(async () => summary);
-  const trees = service(load);
-  const view = render(
-    <WorktreeStatusBar
-      channelId="channel"
-      worktrees={trees}
-      openDiff={() => {}}
-      agentWorking={false}
-      session={session}
-      canvas={canvas}
-    />,
+  let diffCount = 1;
+  const diff = vi.fn(async () => ({
+    content: "",
+    path: summary.path,
+    branch: summary.branch,
+    status: { ...readyStatus, fileCount: diffCount },
+  }));
+  const trees = service(load, true, { diff });
+  const content = (agentWorking: boolean) => (
+    <>
+      <WorktreeStatusBar
+        channelId="channel"
+        worktrees={trees}
+        openDiff={() => {}}
+        agentWorking={agentWorking}
+        session={session}
+        canvas={canvas}
+      />
+      <WorktreeDiffPanel
+        channelContext={{
+          scope: "scope",
+          channelId: "channel",
+          channelName: "channel",
+          viewer: "viewer",
+          relayUrl: "https://relay.example",
+        }}
+        worktrees={trees}
+      />
+    </>
   );
-  expect(await screen.findByText("buzz/example-task")).toBeVisible();
+  const view = render(content(false));
+  expect(await screen.findAllByText("buzz/example-task")).toHaveLength(2);
+  expect(
+    await screen.findByText(
+      "No tracked diff. Git reports 1 changed or untracked file.",
+    ),
+  ).toBeVisible();
+  const baselineDiffCalls = diff.mock.calls.length;
 
-  view.rerender(
-    <WorktreeStatusBar
-      channelId="channel"
-      worktrees={trees}
-      openDiff={() => {}}
-      agentWorking
-      session={session}
-      canvas={canvas}
-    />,
-  );
-  view.rerender(
-    <WorktreeStatusBar
-      channelId="channel"
-      worktrees={trees}
-      openDiff={() => {}}
-      agentWorking={false}
-      session={session}
-      canvas={canvas}
-    />,
-  );
+  diffCount = 2;
+  view.rerender(content(true));
+  view.rerender(content(false));
   await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(diff.mock.calls.length).toBeGreaterThan(baselineDiffCalls),
+  );
+  expect(
+    await screen.findByText(
+      "No tracked diff. Git reports 2 changed or untracked files.",
+    ),
+  ).toBeVisible();
 });
 
 it("aborts and ignores a stale channel request", async () => {

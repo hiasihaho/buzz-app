@@ -23,6 +23,7 @@ import {
 } from "../../shared/design-system/ui/Popover";
 import { writeClipboardText } from "../../shared/clipboard";
 import type { FinishBlocker, WorkspaceFinishPreview } from "./finish";
+import { refreshWorktreeDiff } from "./panel";
 import {
   removedWorkspaceCanvas,
   type WorktreeSummary,
@@ -141,6 +142,7 @@ export function WorktreeStatusBar({
   const request = useRef<AbortController | undefined>(undefined);
   const refresh = useCallback(() => {
     request.current?.abort();
+    refreshWorktreeDiff(channelId);
     if (!available) {
       setBusy(false);
       return;
@@ -158,6 +160,8 @@ export function WorktreeStatusBar({
       (summary) => {
         if (controller.signal.aborted) return;
         setStored({ channelId, status: "ready", summary });
+        if (summary.lifecycle === "removed")
+          refreshWorktreeDiff(channelId, true);
         if (request.current === controller) setBusy(false);
       },
       (reason: unknown) => {

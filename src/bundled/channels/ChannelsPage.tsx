@@ -105,7 +105,7 @@ import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
 import type { Worktrees } from "../worktrees/service";
 import { WorktreeStatusBar } from "../worktrees/WorktreeStatusBar";
-import { worktreeDiffTarget } from "../worktrees/panel";
+import { refreshWorktreeDiff, worktreeDiffTarget } from "../worktrees/panel";
 import {
   useChannelList,
   useChannelRoster,
@@ -2435,12 +2435,13 @@ function ChannelWorkspace({
             session={queries}
             canvas={queries.canvas}
             agentWorking={workingChannels.has(current.id)}
-            openDiff={() =>
+            openDiff={() => {
+              refreshWorktreeDiff(current.id);
               panels.requestOpen({
                 channelId: current.id,
                 target: worktreeDiffTarget(current.id),
-              })
-            }
+              });
+            }}
           />
         )}
       {current &&

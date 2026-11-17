@@ -1,5 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PanelProps } from "../../features/panels/service";
 import { usePanelTabTitle } from "../../features/panels/PanelWorkspace";
 import { GitBranchIcon } from "../../shared/design-system/icons";
@@ -12,6 +12,24 @@ import styles from "./WorktreeDiffPanel.module.css";
 
 const targetPrefix = "buzz:worktree-diff:";
 const tabIcon = <GitBranchIcon size="1rem" />;
+type RefreshListener = (invalidate: boolean) => void;
+const refreshListeners = new Map<string, Set<RefreshListener>>();
+
+function subscribeToRefresh(channelId: string, listener: RefreshListener) {
+  const listeners = refreshListeners.get(channelId) ?? new Set();
+  listeners.add(listener);
+  refreshListeners.set(channelId, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (!listeners.size) refreshListeners.delete(channelId);
+  };
+}
+
+/** Refreshes an already-open diff panel; opening a closed panel loads normally. */
+export function refreshWorktreeDiff(channelId: string, invalidate = false) {
+  for (const listener of refreshListeners.get(channelId) ?? [])
+    listener(invalidate);
+}
 
 export function worktreeDiffTarget(channelId: string) {
   return `${targetPrefix}${channelId}`;
@@ -32,24 +50,49 @@ export function WorktreeDiffPanel({
   const channelId = context?.channelId ?? channelContext?.channelId;
   const [state, setState] = useState<{
     channelId: string;
-    result: WorktreeDiff | Error;
+    result?: WorktreeDiff;
+    error?: Error;
   }>();
+  const request = useRef<AbortController | undefined>(undefined);
+  const load = useCallback(
+    (invalidate = false) => {
+      if (!channelId) return;
+      request.current?.abort();
+      const controller = new AbortController();
+      request.current = controller;
+      setState((current) => {
+        if (invalidate || current?.channelId !== channelId) return undefined;
+        if (!current.error) return current;
+        const { error: _error, ...withoutError } = current;
+        return withoutError;
+      });
+      worktrees.diff(channelId, controller.signal).then(
+        (result) => {
+          if (!controller.signal.aborted) setState({ channelId, result });
+        },
+        (reason: unknown) => {
+          if (controller.signal.aborted) return;
+          setState((current) => ({
+            ...(current?.channelId === channelId ? current : { channelId }),
+            error: new Error(message(reason)),
+          }));
+        },
+      );
+    },
+    [worktrees, channelId],
+  );
   useEffect(() => {
     if (!channelId) return;
-    const controller = new AbortController();
-    worktrees.diff(channelId, controller.signal).then(
-      (result) => {
-        if (!controller.signal.aborted) setState({ channelId, result });
-      },
-      (reason: unknown) => {
-        if (!controller.signal.aborted)
-          setState({ channelId, result: new Error(message(reason)) });
-      },
-    );
-    return () => controller.abort();
-  }, [worktrees, channelId]);
-  const result =
-    state && state.channelId === channelId ? state.result : undefined;
+    const unsubscribe = subscribeToRefresh(channelId, load);
+    load();
+    return () => {
+      unsubscribe();
+      request.current?.abort();
+    };
+  }, [channelId, load]);
+  const current = state?.channelId === channelId ? state : undefined;
+  const result = current?.result;
+  const error = current?.error;
   const files = useMemo(
     () =>
       result && !(result instanceof Error)
@@ -62,13 +105,11 @@ export function WorktreeDiffPanel({
   return (
     <div className={styles.root}>
       <LoadingRegion
-        pending={result === undefined}
+        pending={result === undefined && error === undefined}
         label="Loading local changes…"
-        feedback={
-          result instanceof Error ? <p role="alert">{result.message}</p> : null
-        }
+        feedback={error ? <p role="alert">{error.message}</p> : null}
       >
-        {result && !(result instanceof Error) && (
+        {result && (
           <>
             <p className={styles.location} title={result.path}>
               <strong>{result.branch}</strong>
@@ -108,12 +149,13 @@ export function registerWorktreeDiff(ctx: Context, worktrees: Worktrees) {
   ctx.conversation.registerChatMenu(({ channelId }) =>
     worktrees.canDiff(channelId) ? (
       <MenuItem
-        onClick={() =>
+        onClick={() => {
+          refreshWorktreeDiff(channelId);
           ctx.panels.requestOpen({
             channelId,
             target: worktreeDiffTarget(channelId),
-          })
-        }
+          });
+        }}
       >
         <MenuIcon>
           <GitBranchIcon size={14} />
