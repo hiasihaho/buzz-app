@@ -44,6 +44,7 @@ function worktreesFor(native: boolean) {
     conversation: {
       registerCompletion() {},
       registerTabs() {},
+      registerWorkspace() {},
       registerMessageAction() {},
       chatMenus: {},
     },
