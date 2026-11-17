@@ -145,10 +145,11 @@ export function removedWorkspaceCanvas(
 export function reopenedWorkspaceCanvas<T extends WorkspaceCanvasBinding>(
   content: string,
   binding: T,
+  options: Readonly<{ onlyIfRemovedNotice?: boolean }> = {},
 ): string {
   if (hasWorkspaceBlock(content, binding.path)) return content;
   const authored = withoutRemovedWorkspaceNotice(content);
-  if (authored === content) return content;
+  if (options.onlyIfRemovedNotice && authored === content) return content;
   return preparedWorkspaceCanvas(
     { folders: [binding.repoRoot], canvas: authored },
     binding,

@@ -180,7 +180,7 @@ describe("worktree chat service", () => {
     expect(reopened.endsWith("Authored")).toBe(true);
   });
 
-  it("leaves a ready Canvas alone when it has no removal notice", () => {
+  it("recreates worktree instructions without a removal notice", () => {
     const binding: WorkspaceBinding = {
       bindingId: "binding",
       channelId: "channel",
@@ -196,13 +196,15 @@ describe("worktree chat service", () => {
       owned: true,
       state: "ready",
     };
-    const content = preparedWorkspaceCanvas(
-      { ...workspace, canvas: "Authored" },
-      { ...binding, path: "/trees/other-task" },
-    );
 
-    expect(reopenedWorkspaceCanvas("Authored", binding)).toBe("Authored");
-    expect(reopenedWorkspaceCanvas(content, binding)).toBe(content);
+    const reopened = reopenedWorkspaceCanvas("Authored", binding);
+    expect(reopened).toContain(binding.path);
+    expect(reopened.endsWith("Authored")).toBe(true);
+    expect(
+      reopenedWorkspaceCanvas("Authored", binding, {
+        onlyIfRemovedNotice: true,
+      }),
+    ).toBe("Authored");
   });
 
   it("exposes one configured repository only when desktop Git is available", () => {

@@ -232,23 +232,33 @@ export function WorktreeStatusBar({
     [canvas, channelId],
   );
   const restoreCanvas = useCallback(
-    async (workspace: CanvasWorkspace, ignoreReadError = false) => {
+    async (
+      workspace: CanvasWorkspace,
+      options: Readonly<{
+        ignoreReadError?: boolean;
+        onlyIfRemovedNotice?: boolean;
+      }> = {},
+    ) => {
       let head: Awaited<ReturnType<ChannelCanvas["read"]>>;
       try {
         head = await canvas.read(channelId);
       } catch (reason) {
-        if (ignoreReadError) return;
+        if (options.ignoreReadError) return;
         throw reason;
       }
       if (!head) {
         setCanvasError("");
         return;
       }
-      const content = reopenedWorkspaceCanvas(head.content, {
-        ...workspace,
-        repoRoot:
-          "repoRoot" in workspace ? workspace.repoRoot : workspace.repository,
-      });
+      const content = reopenedWorkspaceCanvas(
+        head.content,
+        {
+          ...workspace,
+          repoRoot:
+            "repoRoot" in workspace ? workspace.repoRoot : workspace.repository,
+        },
+        options,
+      );
       if (content !== head.content)
         await canvas.save(channelId, content, head.id, {
           preserveApproval: true,
@@ -299,7 +309,10 @@ export function WorktreeStatusBar({
   useEffect(() => {
     const workspace = readySummary.current;
     if (!ready || !workspace) return;
-    void restoreCanvas(workspace, true).catch((reason) =>
+    void restoreCanvas(workspace, {
+      ignoreReadError: true,
+      onlyIfRemovedNotice: true,
+    }).catch((reason) =>
       setCanvasError(
         `Worktree ready, but Canvas could not be updated: ${message(reason)}`,
       ),
