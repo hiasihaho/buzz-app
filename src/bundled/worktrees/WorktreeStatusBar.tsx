@@ -26,6 +26,7 @@ import type { FinishBlocker, WorkspaceFinishPreview } from "./finish";
 import { refreshWorktreeDiff } from "./panel";
 import {
   removedWorkspaceCanvas,
+  reopenedWorkspaceCanvas,
   type WorktreeSummary,
   type Worktrees,
 } from "./service";
@@ -137,11 +138,13 @@ export function WorktreeStatusBar({
     | { status: "error"; message: string }
   >();
   const [removing, setRemoving] = useState(false);
+  const [operationError, setOperationError] = useState("");
   const [canvasError, setCanvasError] = useState("");
   const cancel = useRef<HTMLButtonElement>(null);
   const request = useRef<AbortController | undefined>(undefined);
   const refresh = useCallback(() => {
     request.current?.abort();
+    setOperationError("");
     refreshWorktreeDiff(channelId);
     if (!available) {
       setBusy(false);
@@ -201,20 +204,39 @@ export function WorktreeStatusBar({
     },
     [channelId, session, worktrees],
   );
+  type CanvasWorkspace = Pick<
+    WorktreeSummary,
+    "path" | "branch" | "baseRef" | "baseSha"
+  > &
+    ({ repository: string } | { repoRoot: string });
   const updateCanvas = useCallback(
-    async (
-      workspace: Pick<
-        WorktreeSummary,
-        "path" | "branch" | "baseRef" | "baseSha"
-      > &
-        ({ repository: string } | { repoRoot: string }),
-    ) => {
+    async (workspace: CanvasWorkspace) => {
       const head = await canvas.read(channelId);
       if (!head) {
         setCanvasError("");
         return;
       }
       const content = removedWorkspaceCanvas(head.content, {
+        ...workspace,
+        repoRoot:
+          "repoRoot" in workspace ? workspace.repoRoot : workspace.repository,
+      });
+      if (content !== head.content)
+        await canvas.save(channelId, content, head.id, {
+          preserveApproval: true,
+        });
+      setCanvasError("");
+    },
+    [canvas, channelId],
+  );
+  const restoreCanvas = useCallback(
+    async (workspace: CanvasWorkspace) => {
+      const head = await canvas.read(channelId);
+      if (!head) {
+        setCanvasError("");
+        return;
+      }
+      const content = reopenedWorkspaceCanvas(head.content, {
         ...workspace,
         repoRoot:
           "repoRoot" in workspace ? workspace.repoRoot : workspace.repository,
@@ -290,7 +312,9 @@ export function WorktreeStatusBar({
           ? CircleDashedIcon
           : CheckCircleIcon;
   const errorMessage =
-    canvasError || (state.status === "error" ? state.message : "");
+    operationError ||
+    canvasError ||
+    (state.status === "error" ? state.message : "");
 
   const confirmRemoval = async () => {
     if (finish?.status !== "ready" || !finish.preview.head || !summary) return;
@@ -314,6 +338,24 @@ export function WorktreeStatusBar({
       await loadPreview(removalError);
     } finally {
       setRemoving(false);
+    }
+  };
+  const reopen = async () => {
+    setBusy(true);
+    setOperationError("");
+    try {
+      const binding = await worktrees.reopen(channelId);
+      try {
+        await restoreCanvas(binding);
+      } catch (reason) {
+        setCanvasError(
+          `Worktree recreated, but Canvas could not be updated: ${message(reason)}`,
+        );
+      }
+      refresh();
+    } catch (reason) {
+      setOperationError(message(reason));
+      setBusy(false);
     }
   };
   const recover = async () => {
@@ -358,9 +400,21 @@ export function WorktreeStatusBar({
         <div className={styles.actions}>
           {errorMessage && <ErrorPopover message={errorMessage} />}
           {removed ? (
-            <span className={styles.state} role="status">
-              Worktree removed; branch {summary?.branch} remains
-            </span>
+            <>
+              <span className={styles.state} role="status">
+                <span className={styles.statusText}>
+                  Worktree removed; branch {summary?.branch} remains
+                </span>
+              </span>
+              <Button
+                size="inline"
+                variant="ghost"
+                onClick={() => void reopen()}
+                loading={busy}
+              >
+                Recreate worktree
+              </Button>
+            </>
           ) : recovery ? (
             <>
               <span className={styles.state}>Removal needs checking</span>
@@ -487,14 +541,14 @@ export function WorktreeStatusBar({
             {errorMessage}
           </span>
         )}
-        {removed && canvasError && summary && (
+        {canvasError && summary && (
           <Button
             size="inline"
             variant="ghost"
             onClick={() =>
-              void updateCanvas(summary).catch((reason) =>
-                setCanvasError(message(reason)),
-              )
+              void (
+                removed ? updateCanvas(summary) : restoreCanvas(summary)
+              ).catch((reason) => setCanvasError(message(reason)))
             }
           >
             Retry Canvas update

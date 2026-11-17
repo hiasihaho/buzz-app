@@ -64,6 +64,9 @@ function service(diff: Worktrees["diff"]): Worktrees {
     remove: async () => {
       throw new Error("not implemented");
     },
+    reopen: async () => {
+      throw new Error("not implemented");
+    },
     recover: async () => {
       throw new Error("not implemented");
     },

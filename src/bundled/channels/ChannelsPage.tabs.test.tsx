@@ -511,6 +511,9 @@ it("drops an open worktree finish preview when the main Solo chat changes", asyn
     remove: async () => {
       throw new Error("not implemented");
     },
+    reopen: async () => {
+      throw new Error("not implemented");
+    },
     recover: async () => {
       throw new Error("not implemented");
     },
@@ -585,6 +588,9 @@ it("gives a chat-menu-opened local diff panel its originating chat context", asy
       throw new Error("not implemented");
     },
     remove: async () => {
+      throw new Error("not implemented");
+    },
+    reopen: async () => {
       throw new Error("not implemented");
     },
     recover: async () => {

@@ -346,6 +346,68 @@ describe("prepareWorkspace", () => {
     expect(store.forChannel(input.channelId)).toBeUndefined();
   });
 
+  it("reopens a removed binding at its saved branch tip", async () => {
+    const { host, calls } = fixture({
+      existingBranch: true,
+      branchSha: "b".repeat(40),
+    });
+    const store = new BindingStore(memory());
+    store.set({
+      bindingId: "binding-1",
+      channelId: input.channelId,
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task",
+      branch: input.branch,
+      baseRef: input.baseRef,
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 10,
+      installId: input.installId,
+      owned: true,
+      state: "removed",
+    });
+
+    await expect(
+      prepareWorkspace(host, store, input, options),
+    ).resolves.toMatchObject({
+      state: "ready",
+      branch: input.branch,
+    });
+    expect(calls).toContainEqual([
+      "worktree",
+      "add",
+      "/trees/task",
+      "buzz/task",
+    ]);
+  });
+
+  it("keeps a removed binding retryable when reopening fails", async () => {
+    const { host } = fixture({ existingBranch: true, addFails: true });
+    const store = new BindingStore(memory());
+    const removed: WorkspaceBinding = {
+      bindingId: "binding-1",
+      channelId: input.channelId,
+      repoRoot: "/repo",
+      worktreeRoot: "/trees",
+      path: "/trees/task",
+      branch: input.branch,
+      baseRef: input.baseRef,
+      baseSha: "a".repeat(40),
+      gitCommonDir: "/repo/.git",
+      createdAt: 10,
+      installId: input.installId,
+      owned: true,
+      state: "removed",
+    };
+    store.set(removed);
+
+    await expect(prepareWorkspace(host, store, input, options)).rejects.toThrow(
+      "add failed",
+    );
+    expect(store.forChannel(input.channelId)).toEqual(removed);
+  });
+
   it("recreates an owned prunable registration in an existing empty leaf", async () => {
     const root = await mkdtemp(join(tmpdir(), "buzz-worktree-prepare-"));
     try {

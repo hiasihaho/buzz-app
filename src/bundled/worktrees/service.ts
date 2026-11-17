@@ -66,16 +66,22 @@ export type Worktrees = WorktreePreparation &
       inspectAgents: () => readonly string[],
       signal?: AbortSignal,
     ): Promise<WorkspaceBinding>;
+    reopen(channelId: string, signal?: AbortSignal): Promise<WorkspaceBinding>;
     recover(channelId: string): Promise<WorkspaceBinding>;
   }>;
 
 const workspaceBlockStart = "<!-- buzz-session-workspace:v1 ";
 const workspaceBlockEnd = "<!-- /buzz-session-workspace -->";
 
+type WorkspaceCanvasBinding = Pick<
+  WorkspaceBinding,
+  "path" | "branch" | "repoRoot" | "baseRef" | "baseSha"
+>;
+
 /** Replaces create-time instructions with the worktree Buzz already prepared. */
-export function preparedWorkspaceCanvas(
+export function preparedWorkspaceCanvas<T extends WorkspaceCanvasBinding>(
   value: Workspace,
-  binding: WorkspaceBinding,
+  binding: T,
 ): string {
   const instructions = [
     "## Prepared worktree",
@@ -130,14 +136,55 @@ export function removedWorkspaceCanvas(
   const after = afterBlock.startsWith(generated)
     ? afterBlock.slice(generated.length)
     : afterBlock;
-  const retained = [
-    "## Worktree removed",
-    "",
-    `The local worktree was removed. Branch \`${binding.branch}\` and its commits remain in the repository.`,
-    "Do not create another worktree in this chat. If more work is needed, tell the user to start a new chat.",
-  ].join("\n");
+  const retained = removedWorkspaceNotice(binding.branch);
   const remainder = `${before}${after}`;
   return remainder ? `${retained}\n\n${remainder}` : retained;
+}
+
+/** Restores worktree instructions while preserving authored Canvas text. */
+export function reopenedWorkspaceCanvas<T extends WorkspaceCanvasBinding>(
+  content: string,
+  binding: T,
+): string {
+  if (hasWorkspaceBlock(content, binding.path)) return content;
+  const notice = removedWorkspaceNotice(binding.branch);
+  const authored = content.startsWith(`${notice}\n\n`)
+    ? content.slice(notice.length + 2)
+    : content === notice
+      ? ""
+      : content;
+  return preparedWorkspaceCanvas(
+    { folders: [binding.repoRoot], canvas: authored },
+    binding,
+  );
+}
+
+function hasWorkspaceBlock(content: string, path: string): boolean {
+  const start = content.indexOf(workspaceBlockStart);
+  const end = start < 0 ? -1 : content.indexOf(workspaceBlockEnd, start);
+  const metadataEnd =
+    start < 0
+      ? -1
+      : content.indexOf(" -->", start + workspaceBlockStart.length);
+  if (start < 0 || end < 0 || metadataEnd < 0 || metadataEnd > end)
+    return false;
+  try {
+    const metadata = JSON.parse(
+      content.slice(start + workspaceBlockStart.length, metadataEnd),
+    ) as { folders?: unknown };
+    return Array.isArray(metadata.folders) && metadata.folders.includes(path);
+  } catch {
+    return false;
+  }
+}
+
+function removedWorkspaceNotice(branch: string): string {
+  return [
+    "## Worktree removed",
+    "",
+    `The local worktree was removed. Branch \`${branch}\` and its commits remain in the repository.`,
+    "Do not create another worktree yourself. If more work is needed, ask the user to choose Recreate worktree.",
+  ].join("\n");
 }
 
 export function createWorktrees(
@@ -262,6 +309,27 @@ export function createWorktrees(
           inspectUse: async () => ({ agents: inspectAgents() }),
           ...(signal ? { signal } : {}),
         },
+      );
+    },
+    async reopen(channelId, signal) {
+      if (!desktop) throw new Error("Local Git is unavailable");
+      await recovery;
+      const binding = ownedChannelBinding(bindings, channelId);
+      if (binding.state !== "removed")
+        throw new Error("This chat has no removed local worktree");
+      return prepareWorkspace(
+        desktop,
+        bindings,
+        {
+          channelId,
+          repoRoot: binding.repoRoot,
+          worktreeRoot: binding.worktreeRoot,
+          worktreeName: pathLeaf(binding.path),
+          branch: binding.branch,
+          baseRef: binding.baseRef,
+          installId: binding.installId,
+        },
+        signal ? { signal } : {},
       );
     },
     async recover(channelId) {

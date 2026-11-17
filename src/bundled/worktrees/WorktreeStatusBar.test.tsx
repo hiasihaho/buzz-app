@@ -7,6 +7,7 @@ import { writeClipboardText } from "../../shared/clipboard";
 import type { WorkspaceFinishPreview } from "./finish";
 import {
   preparedWorkspaceCanvas,
+  removedWorkspaceCanvas,
   type WorktreeSummary,
   type Worktrees,
 } from "./service";
@@ -104,6 +105,9 @@ function service(
       blockers: [],
     }),
     remove: async () => {
+      throw new Error("not implemented");
+    },
+    reopen: async () => {
       throw new Error("not implemented");
     },
     recover: async () => {
@@ -597,21 +601,47 @@ it("remounts chat-owned finish state when the channel changes", async () => {
   ).not.toBeInTheDocument();
 });
 
-it("shows removing and removed lifecycle states", async () => {
+it("shows removing and reopens removed lifecycle states", async () => {
+  const user = userEvent.setup();
+  const reopenedBinding = {
+    ...summaryForLifecycle("ready"),
+    repoRoot: summary.repository,
+    worktreeRoot: "/trees",
+    gitCommonDir: "/repo/.git",
+    bindingId: "binding",
+    channelId: "removed",
+    createdAt: 1,
+    installId: "install",
+    owned: true,
+    state: "ready" as const,
+  };
+  const reopen = vi.fn(async () => reopenedBinding as never);
   const trees = service(
     async (channelId) =>
       summaryForLifecycle(channelId === "removing" ? "removing" : "removed"),
     true,
     {
       recover: vi.fn(async () => ({ state: "removed" }) as never),
+      reopen,
     },
   );
+  const prepared = preparedWorkspaceCanvas(
+    { folders: [summary.repository], canvas: "Authored" },
+    reopenedBinding,
+  );
+  const removed = removedWorkspaceCanvas(prepared, reopenedBinding);
+  const save = vi.fn(async (_channelId: string, _content: string) => ({
+    id: "saved",
+  }));
   const props = {
     worktrees: trees,
     openDiff: () => {},
     agentWorking: false,
     session,
-    canvas: { read: vi.fn(async () => undefined), save: vi.fn() } as never,
+    canvas: {
+      read: vi.fn(async () => ({ id: "canvas-head", content: removed })),
+      save,
+    } as never,
   };
   const view = render(<WorktreeStatusBar channelId="removing" {...props} />);
   expect(await screen.findByText("Removal needs checking")).toBeVisible();
@@ -626,6 +656,12 @@ it("shows removing and removed lifecycle states", async () => {
   expect(
     screen.queryByRole("button", { name: "Finish" }),
   ).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Recreate worktree" }));
+  expect(reopen).toHaveBeenCalledWith("removed");
+  await waitFor(() => expect(save).toHaveBeenCalledOnce());
+  expect(save.mock.calls[0]?.[1]).toContain("## Prepared worktree");
+  expect(save.mock.calls[0]?.[1]).toContain("Authored");
+  expect(save.mock.calls[0]?.[1]).not.toContain("## Worktree removed");
 });
 
 it("keeps a Canvas write failure visible and retries it", async () => {

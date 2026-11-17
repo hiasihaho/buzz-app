@@ -534,9 +534,9 @@ and are asked to sign in again in Buzz.
   and Refresh reads the local status again. Untracked files are counted but are
   not rendered as a patch. **Finish** checks the worktree again and explains
   anything that prevents removal. A clean worktree can be removed after a
-  confirmation; the branch, commits and chat remain. A removed worktree closes
-  that chat for further agent work; start a new chat if more work is needed.
-  Buzz can detect active agents, but not terminals, editors or other programs
+  confirmation; the branch, commits and chat remain. To continue later in the
+  same chat and branch, choose **Recreate worktree** in its status row. Buzz can
+  detect active agents, but not terminals, editors or other programs
   using the folder, so close those first. If removal or the Canvas update is
   interrupted, use the recovery action in the status row.
   In **New chat**, typing **#** lists your workspaces

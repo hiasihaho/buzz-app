@@ -126,7 +126,11 @@ export async function prepareWorkspace(
       worktree,
       options.signal,
     );
-  if (!worktree) await assertBranchAtBase(host, preparing, options.signal);
+  if (!worktree) {
+    if (sameExistingIntent && existing.state === "removed")
+      await assertBranchExists(host, preparing, options.signal);
+    else await assertBranchAtBase(host, preparing, options.signal);
+  }
   bindings.set(preparing);
 
   try {
@@ -141,7 +145,11 @@ export async function prepareWorkspace(
     bindings.set(ready);
     return ready;
   } catch (error) {
-    bindings.set({ ...preparing, state: "failed" });
+    bindings.set(
+      sameExistingIntent && existing.state === "removed"
+        ? existing
+        : { ...preparing, state: "failed" },
+    );
     throw error;
   }
 }
@@ -253,6 +261,15 @@ async function assertBranchAtBase(
   const sha = await resolveBranchSha(host, binding, signal);
   if (sha && sha !== binding.baseSha)
     throw new Error("Workspace branch already exists at a different commit");
+}
+
+async function assertBranchExists(
+  host: DesktopHost,
+  binding: WorkspaceBinding,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!(await resolveBranchSha(host, binding, signal)))
+    throw new Error("The saved workspace branch no longer exists");
 }
 
 async function resolveBranchSha(

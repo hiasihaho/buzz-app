@@ -9,6 +9,7 @@ import {
   createWorktrees,
   preparedWorkspaceCanvas,
   removedWorkspaceCanvas,
+  reopenedWorkspaceCanvas,
 } from "./service";
 import type { Workspace } from "../../features/solo/workspace";
 
@@ -134,9 +135,17 @@ describe("worktree chat service", () => {
       `Branch \`${binding.branch}\` and its commits remain`,
     );
     expect(removed).toContain(
-      "Do not create another worktree in this chat. If more work is needed, tell the user to start a new chat.",
+      "Do not create another worktree yourself. If more work is needed, ask the user to choose Recreate worktree.",
     );
     expect(removed.endsWith(authored)).toBe(true);
+
+    const reopened = reopenedWorkspaceCanvas(removed, {
+      ...binding,
+      state: "ready",
+    });
+    expect(reopened).toContain(binding.path);
+    expect(reopened).not.toContain("## Worktree removed");
+    expect(reopened.endsWith(authored)).toBe(true);
   });
 
   it("exposes one configured repository only when desktop Git is available", () => {
@@ -558,7 +567,19 @@ describe("worktree chat service", () => {
         "-qm",
         "base",
       ]);
+      const baseSha = run(repoRoot, ["rev-parse", "HEAD"]);
       run(repoRoot, ["worktree", "add", "-qb", "buzz/task", path, "main"]);
+      await writeFile(join(path, "README.md"), "base\ncontinued\n");
+      run(path, ["add", "README.md"]);
+      run(path, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "commit",
+        "-qm",
+        "continue task",
+      ]);
       const head = run(path, ["rev-parse", "HEAD"]);
       const saved = storage();
       saved.setItem("buzz.worktrees.install.v1", "install");
@@ -570,7 +591,7 @@ describe("worktree chat service", () => {
         path,
         branch: "buzz/task",
         baseRef: "main",
-        baseSha: head,
+        baseSha,
         gitCommonDir: await realpath(join(repoRoot, ".git")),
         createdAt: 1,
         installId: "install",
@@ -599,6 +620,12 @@ describe("worktree chat service", () => {
       expect(run(repoRoot, ["rev-parse", `refs/heads/${binding.branch}`])).toBe(
         head,
       );
+      await expect(service.reopen(binding.channelId)).resolves.toMatchObject({
+        state: "ready",
+        path,
+      });
+      expect(run(path, ["rev-parse", "HEAD"])).toBe(head);
+      expect(service.canDiff(binding.channelId)).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
