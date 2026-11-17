@@ -1,5 +1,5 @@
 import { spawn as spawnProcess, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Host, HostProcessOptions } from "../../features/host/service";
@@ -35,6 +35,8 @@ function fixture(
     locked?: boolean;
     prunable?: boolean;
     resolvedWorktreePath?: string;
+    invalidRepo?: boolean;
+    missingBase?: boolean;
   } = {},
 ) {
   const calls: string[][] = [];
@@ -50,6 +52,21 @@ function fixture(
       let stderr = "";
       let code = 0;
       if (
+        gitArgs[0] === "rev-parse" &&
+        gitArgs.includes("--is-inside-work-tree")
+      ) {
+        if (options.invalidRepo) {
+          stderr = "fatal: not a git repository";
+          code = 128;
+        } else stdout = "true\n";
+      } else if (
+        gitArgs[0] === "rev-parse" &&
+        gitArgs.at(-1) === "origin/main^{commit}" &&
+        options.missingBase
+      ) {
+        stderr = "fatal: Needed a single revision";
+        code = 128;
+      } else if (
         gitArgs[0] === "rev-parse" &&
         gitArgs.includes("refs/heads/buzz/task^{commit}")
       )
@@ -303,12 +320,14 @@ describe("prepareWorkspace", () => {
   });
 
   it("rejects a symlink leaf that resolves outside the worktree root", async () => {
-    const { host } = fixture({ resolvedWorktreePath: "/outside" });
+    const { host, calls } = fixture({ resolvedWorktreePath: "/outside" });
     const store = new BindingStore(memory());
     await expect(prepareWorkspace(host, store, input, options)).rejects.toThrow(
       "inside the configured root",
     );
-    expect(host.spawn).not.toHaveBeenCalled();
+    expect(
+      calls.some((args) => args[0] === "worktree" && args[1] === "add"),
+    ).toBe(false);
     expect(store.forChannel(input.channelId)).toBeUndefined();
   });
 
@@ -392,6 +411,77 @@ describe("prepareWorkspace", () => {
         (args) => args[0] === "worktree" && args[1] === "remove",
       ),
     ).toBe(false);
+  });
+
+  it("explains an invalid repository without creating the worktree leaf", async () => {
+    const { host } = fixture({ invalidRepo: true });
+    const store = new BindingStore(memory());
+
+    await expect(prepareWorkspace(host, store, input, options)).rejects.toThrow(
+      'Workspace folder "/repo-link" is not a Git repository. Choose a Git repository in Workspace settings.',
+    );
+    expect(host.resolveDirectory).not.toHaveBeenCalledWith("/trees/task");
+    expect(store.forChannel(input.channelId)).toBeUndefined();
+  });
+
+  it("explains a missing base branch without creating the worktree leaf", async () => {
+    const { host } = fixture({ missingBase: true });
+    const store = new BindingStore(memory());
+
+    await expect(prepareWorkspace(host, store, input, options)).rejects.toThrow(
+      'Base branch "origin/main" was not found in workspace repository "/repo-link". Choose an existing base branch in Workspace settings.',
+    );
+    expect(host.resolveDirectory).not.toHaveBeenCalledWith("/trees/task");
+    expect(store.forChannel(input.channelId)).toBeUndefined();
+  });
+
+  it("does not create a leaf for invalid real Git workspace settings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "buzz-worktree-invalid-"));
+    try {
+      const repoRoot = join(root, "repo");
+      const worktreeRoot = join(root, "trees");
+      const worktreePath = join(worktreeRoot, "task");
+      await mkdir(repoRoot);
+      await mkdir(worktreeRoot);
+      const host = realHost();
+      const realInput = {
+        ...input,
+        repoRoot,
+        worktreeRoot,
+        baseRef: "main",
+      };
+
+      await expect(
+        prepareWorkspace(host, new BindingStore(memory()), realInput, options),
+      ).rejects.toThrow("is not a Git repository");
+      await expect(access(worktreePath)).rejects.toThrow();
+
+      spawnSync("git", ["init", "-q", "-b", "develop", repoRoot], {
+        stdio: "inherit",
+      });
+      spawnSync(
+        "git",
+        [
+          "-C",
+          repoRoot,
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.org",
+          "commit",
+          "--allow-empty",
+          "-qm",
+          "base",
+        ],
+        { stdio: "inherit" },
+      );
+      await expect(
+        prepareWorkspace(host, new BindingStore(memory()), realInput, options),
+      ).rejects.toThrow('Base branch "main" was not found');
+      await expect(access(worktreePath)).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("records failed and rethrows when creation fails", async () => {

@@ -46,18 +46,21 @@ export async function prepareWorkspace(
   validateRef(input.branch, "branch");
   validateRef(input.baseRef, "base ref");
 
-  const repoRoot = await host.resolveDirectory(input.repoRoot);
+  const repoCandidate = await existingDirectoryCandidate(host, input.repoRoot);
+  await assertGitRepository(
+    host,
+    repoCandidate,
+    input.repoRoot,
+    options.signal,
+  );
+  const repoRoot = await host.resolveDirectory(repoCandidate);
   const worktreeRoot = await host.resolveDirectory(input.worktreeRoot);
   const requestedPath = joinLeaf(worktreeRoot, input.worktreeName);
   assertPathWithinRoot(worktreeRoot, requestedPath);
-  // Creating the empty leaf is safe and lets the host resolve a pre-existing
-  // leaf symlink before Git can write through it.
-  const path = await host.resolveDirectory(requestedPath);
-  assertPathWithinRoot(worktreeRoot, path);
   const existing = bindings.forChannel(input.channelId);
   const sameExistingIntent =
     existing?.owned === true &&
-    sameIntent(existing, input, repoRoot, worktreeRoot, path);
+    sameIntent(existing, input, repoRoot, worktreeRoot, requestedPath);
   const replacingFailed =
     existing?.owned === true &&
     existing.state === "failed" &&
@@ -68,18 +71,12 @@ export async function prepareWorkspace(
 
   const baseSha = sameExistingIntent
     ? existing.baseSha
-    : trimSha(
-        await runGit(
-          host.spawn,
-          repoRoot,
-          [
-            "rev-parse",
-            "--verify",
-            "--end-of-options",
-            `${input.baseRef}^{commit}`,
-          ],
-          options.signal,
-        ),
+    : await resolveBaseSha(
+        host,
+        repoRoot,
+        input.baseRef,
+        input.repoRoot,
+        options.signal,
       );
   await runGit(
     host.spawn,
@@ -92,6 +89,11 @@ export async function prepareWorkspace(
     repoRoot,
     options.signal,
   );
+  // Resolve the leaf only after the repository and base ref are known-good.
+  // The host creates missing directories, so doing this earlier would leave an
+  // empty worktree folder behind for an invalid workspace configuration.
+  const path = await host.resolveDirectory(requestedPath);
+  assertPathWithinRoot(worktreeRoot, path);
 
   const identity = {
     repoRoot,
@@ -140,6 +142,68 @@ export async function prepareWorkspace(
     return ready;
   } catch (error) {
     bindings.set({ ...preparing, state: "failed" });
+    throw error;
+  }
+}
+
+async function existingDirectoryCandidate(
+  host: DesktopHost,
+  path: string,
+): Promise<string> {
+  if (path === "~") return host.resolveDirectory(path);
+  if (/^~[\\/]/.test(path)) {
+    const home = await host.resolveDirectory("~");
+    return joinLeaf(home, path.slice(2));
+  }
+  return path;
+}
+
+async function assertGitRepository(
+  host: DesktopHost,
+  repoPath: string,
+  configuredPath: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  try {
+    const inside = trimLine(
+      await runGit(
+        host.spawn,
+        repoPath,
+        ["rev-parse", "--is-inside-work-tree"],
+        signal,
+      ),
+    );
+    if (inside !== "true") throw new GitError("not a work tree", 128, "");
+  } catch (error) {
+    if (error instanceof GitError)
+      throw new Error(
+        `Workspace folder "${configuredPath}" is not a Git repository. Choose a Git repository in Workspace settings.`,
+      );
+    throw error;
+  }
+}
+
+async function resolveBaseSha(
+  host: DesktopHost,
+  repoRoot: string,
+  baseRef: string,
+  configuredPath: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  try {
+    return trimSha(
+      await runGit(
+        host.spawn,
+        repoRoot,
+        ["rev-parse", "--verify", "--end-of-options", `${baseRef}^{commit}`],
+        signal,
+      ),
+    );
+  } catch (error) {
+    if (error instanceof GitError)
+      throw new Error(
+        `Base branch "${baseRef}" was not found in workspace repository "${configuredPath}". Choose an existing base branch in Workspace settings.`,
+      );
     throw error;
   }
 }

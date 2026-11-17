@@ -312,6 +312,7 @@ describe("worktree chat service", () => {
         const args = options.args ?? [];
         let stdout = "";
         if (args.includes("--version")) stdout = "git version 2.43.0\n";
+        else if (args.includes("--is-inside-work-tree")) stdout = "true\n";
         else if (args.includes("worktree"))
           stdout = `worktree /repo\0HEAD ${"b".repeat(40)}\0branch refs/heads/main\0\0worktree /trees/original-abcd\0HEAD ${"a".repeat(40)}\0branch refs/heads/buzz/original-abcd\0\0`;
         else if (args.at(-1) === "--git-common-dir") stdout = "/repo/.git\n";
@@ -384,6 +385,7 @@ describe("worktree chat service", () => {
         const args = options.args ?? [];
         let stdout = "";
         if (args.includes("--version")) stdout = "git version 2.43.0\n";
+        else if (args.includes("--is-inside-work-tree")) stdout = "true\n";
         else if (args.includes("worktree") && args.includes("list"))
           stdout = `worktree /repo\0HEAD ${"a".repeat(40)}\0branch refs/heads/main\0\0${
             added
