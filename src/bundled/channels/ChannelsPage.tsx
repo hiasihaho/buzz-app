@@ -2435,8 +2435,8 @@ function ChannelWorkspace({
             session={queries}
             canvas={queries.canvas}
             agentWorking={workingChannels.has(current.id)}
-            openDiff={(comparison) => {
-              refreshWorktreeDiff(current.id);
+            openDiff={(comparison = "uncommitted") => {
+              refreshWorktreeDiff(current.id, false, comparison);
               panels.requestOpen({
                 channelId: current.id,
                 target: worktreeDiffTarget(current.id, comparison),

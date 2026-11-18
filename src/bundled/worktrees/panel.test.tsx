@@ -5,7 +5,11 @@ import type { ReactElement } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Panel, PanelProps } from "../../features/panels/service";
 import type { ChatMenuProps } from "../../features/conversation/service";
-import type { WorktreeDiff, Worktrees } from "./service";
+import type {
+  WorktreeDiff,
+  WorktreeDiffComparison,
+  Worktrees,
+} from "./service";
 import {
   refreshWorktreeDiff,
   registerWorktreeDiff,
@@ -270,36 +274,38 @@ it("aborts an older same-chat request and ignores its stale result", async () =>
   expect(await screen.findByText("buzz/current")).toBeVisible();
 });
 
-it("invalidates a removed worktree instead of retaining a stale clean claim", async () => {
-  const diff = vi
-    .fn<Worktrees["diff"]>()
-    .mockResolvedValueOnce({
-      ...result("alpha", "since-base"),
-      content: "",
-      status: { ...status, dirty: false, fileCount: 0 },
-    })
-    .mockRejectedValueOnce(new Error("This chat has no ready local worktree"));
-  render(
-    <WorktreeDiffPanel
-      {...props("alpha")}
-      target={worktreeDiffTarget("alpha", "since-base")}
-      worktrees={service(diff)}
-    />,
-  );
-  expect(
-    await screen.findByText(
-      "No changes since the merge base with origin/main.",
-    ),
-  ).toBeVisible();
+it.each<readonly [WorktreeDiffComparison, string]>([
+  ["uncommitted", "The local worktree has no changes."],
+  ["since-base", "No changes since the merge base with origin/main."],
+])(
+  "invalidates a removed worktree instead of retaining a stale %s claim",
+  async (comparison, emptyMessage) => {
+    const diff = vi
+      .fn<Worktrees["diff"]>()
+      .mockResolvedValueOnce({
+        ...result("alpha", comparison),
+        content: "",
+        status: { ...status, dirty: false, fileCount: 0 },
+      })
+      .mockRejectedValueOnce(
+        new Error("This chat has no ready local worktree"),
+      );
+    render(
+      <WorktreeDiffPanel
+        {...props("alpha")}
+        target={worktreeDiffTarget("alpha", comparison)}
+        worktrees={service(diff)}
+      />,
+    );
+    expect(await screen.findByText(emptyMessage)).toBeVisible();
 
-  act(() => refreshWorktreeDiff("alpha", true));
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "This chat has no ready local worktree",
-  );
-  expect(
-    screen.queryByText("No changes since the merge base with origin/main."),
-  ).not.toBeInTheDocument();
-});
+    act(() => refreshWorktreeDiff("alpha", true));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This chat has no ready local worktree",
+    );
+    expect(screen.queryByText(emptyMessage)).not.toBeInTheDocument();
+  },
+);
 
 it("reports reconciliation failures and never paints a stale channel response", async () => {
   let resolveAlpha!: (value: WorktreeDiff) => void;

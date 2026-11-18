@@ -293,6 +293,8 @@ describe("worktree chat service", () => {
       "",
     ].join("\n");
     let mergeBaseOutput = `${"c".repeat(40)}\n`;
+    let mergeBaseCode = 0;
+    let mergeBaseStderr = "";
     let diffOutput = patch;
     const spawn: NonNullable<Host["spawn"]> = vi.fn(
       async (_id, options = {}) => {
@@ -315,11 +317,14 @@ describe("worktree chat service", () => {
         else if (args.includes("diff")) stdout = diffOutput;
         else throw new Error(`Unexpected git call: ${args.join(" ")}`);
         options.onStdout?.(stdout);
+        if (args.includes("merge-base")) options.onStderr?.(mergeBaseStderr);
         return {
           write: async () => {},
           end: async () => {},
           kill: async () => {},
-          exited: Promise.resolve(0),
+          exited: Promise.resolve(
+            args.includes("merge-base") ? mergeBaseCode : 0,
+          ),
         };
       },
     );
@@ -406,6 +411,23 @@ describe("worktree chat service", () => {
     await expect(
       service.diff(binding.channelId, undefined, "since-base"),
     ).rejects.toThrow("Git returned an invalid merge base");
+
+    mergeBaseOutput = "";
+    mergeBaseCode = 128;
+    mergeBaseStderr = "fatal: Not a valid object name main\n";
+    await expect(
+      service.diff(binding.channelId, undefined, "since-base"),
+    ).rejects.toThrow(
+      "The configured base main is unavailable. View local changes to inspect uncommitted changes.",
+    );
+
+    mergeBaseCode = 1;
+    mergeBaseStderr = "";
+    await expect(
+      service.diff(binding.channelId, undefined, "since-base"),
+    ).rejects.toThrow(
+      "No common history exists between main and this worktree. View local changes to inspect uncommitted changes.",
+    );
 
     diffOutput = "x".repeat(2_000_001);
     await expect(service.diff(binding.channelId)).rejects.toThrow(

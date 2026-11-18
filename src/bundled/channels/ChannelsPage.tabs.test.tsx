@@ -114,6 +114,7 @@ async function page(
   worktrees?: Worktrees,
   initialVisit = false,
   appMatches?: RegisteredPanel["matches"],
+  appKeepOpen = true,
 ) {
   const viewer = keypair(),
     authority = keypair();
@@ -214,7 +215,7 @@ async function page(
     pluginId: "fixture",
     revision: "1",
     title: "App",
-    keepOpen: true,
+    keepOpen: appKeepOpen,
     matches: (target) =>
       target === "https://app.example/" || appMatches?.(target) === true,
     component: appComponent ?? (() => <p>App content</p>),
@@ -616,6 +617,7 @@ it("reloads an open local diff when its file counter is clicked again", async ()
     worktrees,
     true,
     (target) => target.startsWith(worktreeDiffTarget("alpha")),
+    false,
   );
   const counter = await screen.findByRole("button", {
     name: "View 1 changed file in local changes",
@@ -628,6 +630,10 @@ it("reloads an open local diff when its file counter is clicked again", async ()
     ),
   ).toBeVisible();
   expect(diff).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("tab", { name: "Local changes" })).toBeVisible();
+  expect(
+    screen.queryByRole("tab", { name: "Changes since base" }),
+  ).not.toBeInTheDocument();
 
   fileCount = 2;
   await h.user.click(counter);
@@ -651,6 +657,26 @@ it("reloads an open local diff when its file counter is clicked again", async ()
     expect.any(AbortSignal),
     "since-base",
   );
+  expect(screen.getByRole("tab", { name: "Changes since base" })).toBeVisible();
+  expect(
+    screen.queryByRole("tab", { name: "Local changes" }),
+  ).not.toBeInTheDocument();
+
+  await h.user.click(counter);
+  expect(
+    await screen.findByText(
+      "No tracked diff. Git reports 2 changed or untracked files.",
+    ),
+  ).toBeVisible();
+  expect(diff).toHaveBeenLastCalledWith(
+    "alpha",
+    expect.any(AbortSignal),
+    "uncommitted",
+  );
+  expect(screen.getByRole("tab", { name: "Local changes" })).toBeVisible();
+  expect(
+    screen.queryByRole("tab", { name: "Changes since base" }),
+  ).not.toBeInTheDocument();
 });
 
 it("gives a chat-menu-opened local diff panel its originating chat context", async () => {

@@ -9,7 +9,7 @@ import {
   removeWorkspace,
   type WorkspaceFinishPreview,
 } from "./finish";
-import { countUnpublishedCommits, runGit } from "./git";
+import { countUnpublishedCommits, GitError, runGit } from "./git";
 
 const INSTALL_ID_KEY = "buzz.worktrees.install.v1";
 const MAX_DIFF_BYTES = 2_000_000;
@@ -286,14 +286,7 @@ export function createWorktrees(
       const status = await readyStatus(desktop.spawn, binding, signal);
       const base =
         comparison === "since-base"
-          ? parseCommit(
-              await runGit(
-                desktop.spawn,
-                binding.path,
-                ["merge-base", "--", binding.baseRef, "HEAD"],
-                signal,
-              ),
-            )
+          ? await diffBase(desktop.spawn, binding.path, binding.baseRef, signal)
           : "HEAD";
       const unpublishedCommits =
         comparison === "since-base"
@@ -460,6 +453,28 @@ async function readyStatus(
           : "The local worktree no longer matches this chat"),
     );
   return status;
+}
+
+async function diffBase(
+  spawn: NonNullable<Host["spawn"]>,
+  path: string,
+  baseRef: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  try {
+    return parseCommit(
+      await runGit(spawn, path, ["merge-base", "--", baseRef, "HEAD"], signal),
+    );
+  } catch (error) {
+    if (!(error instanceof GitError)) throw error;
+    const reason =
+      error.code === 1
+        ? `No common history exists between ${baseRef} and this worktree.`
+        : `The configured base ${baseRef} is unavailable.`;
+    throw new Error(
+      `${reason} View local changes to inspect uncommitted changes.`,
+    );
+  }
 }
 
 function parseCommit(value: string): string {

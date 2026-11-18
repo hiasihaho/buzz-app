@@ -16,7 +16,10 @@ import styles from "./WorktreeDiffPanel.module.css";
 
 const targetPrefix = "buzz:worktree-diff:";
 const tabIcon = <GitBranchIcon size="1rem" />;
-type RefreshListener = (invalidate: boolean) => void;
+type RefreshListener = (
+  invalidate: boolean,
+  comparison?: WorktreeDiffComparison,
+) => void;
 const refreshListeners = new Map<string, Set<RefreshListener>>();
 
 function subscribeToRefresh(channelId: string, listener: RefreshListener) {
@@ -30,9 +33,13 @@ function subscribeToRefresh(channelId: string, listener: RefreshListener) {
 }
 
 /** Refreshes an already-open diff panel; opening a closed panel loads normally. */
-export function refreshWorktreeDiff(channelId: string, invalidate = false) {
+export function refreshWorktreeDiff(
+  channelId: string,
+  invalidate = false,
+  comparison?: WorktreeDiffComparison,
+) {
   for (const listener of refreshListeners.get(channelId) ?? [])
-    listener(invalidate);
+    listener(invalidate, comparison);
 }
 
 export function worktreeDiffTarget(
@@ -110,13 +117,19 @@ export function WorktreeDiffPanel({
   );
   useEffect(() => {
     if (!channelId) return;
-    const unsubscribe = subscribeToRefresh(channelId, load);
+    const unsubscribe = subscribeToRefresh(
+      channelId,
+      (invalidate, requestedComparison) => {
+        if (!requestedComparison || requestedComparison === comparison)
+          load(invalidate);
+      },
+    );
     load();
     return () => {
       unsubscribe();
       request.current?.abort();
     };
-  }, [channelId, load]);
+  }, [channelId, load, comparison]);
   const current =
     state && state.channelId === channelId && state.comparison === comparison
       ? state
@@ -195,7 +208,7 @@ export function registerWorktreeDiff(ctx: Context, worktrees: Worktrees) {
     worktrees.canDiff(channelId) ? (
       <MenuItem
         onClick={() => {
-          refreshWorktreeDiff(channelId);
+          refreshWorktreeDiff(channelId, false, "uncommitted");
           ctx.panels.requestOpen({
             channelId,
             target: worktreeDiffTarget(channelId),
