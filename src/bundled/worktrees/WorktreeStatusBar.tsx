@@ -517,13 +517,15 @@ export function WorktreeStatusBar({
                     : `View changes from ${countLabel(ahead, "local commit")} since the base`
                 }
                 title={
-                  ahead === undefined
-                    ? "View changes since the base"
-                    : `${countLabel(ahead, "commit")} ahead of ${summary?.baseRef}; ${
-                        unpublished === undefined
-                          ? "remote-tracking evidence unavailable"
-                          : `${countLabel(unpublished, "commit")} not found on a local remote-tracking branch`
-                      }`
+                  !ready
+                    ? "Branch diff is unavailable"
+                    : ahead === undefined
+                      ? "View branch diff"
+                      : `View branch diff: ${countLabel(ahead, "commit")} ahead of ${summary?.baseRef}; ${
+                          unpublished === undefined
+                            ? "remote-tracking evidence unavailable"
+                            : `${countLabel(unpublished, "commit")} not found on a local remote-tracking branch`
+                        }`
                 }
                 onClick={() => openDiff("since-base")}
               >

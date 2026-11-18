@@ -632,7 +632,7 @@ it("reloads an open local diff when its file counter is clicked again", async ()
   expect(diff).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("tab", { name: "Local changes" })).toBeVisible();
   expect(
-    screen.queryByRole("tab", { name: "Changes since base" }),
+    screen.queryByRole("tab", { name: "Branch diff" }),
   ).not.toBeInTheDocument();
 
   fileCount = 2;
@@ -658,7 +658,7 @@ it("reloads an open local diff when its file counter is clicked again", async ()
     "since-base",
   );
   expect(diff).toHaveBeenCalledTimes(3);
-  expect(screen.getByRole("tab", { name: "Changes since base" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: "Branch diff" })).toBeVisible();
   expect(
     screen.queryByRole("tab", { name: "Local changes" }),
   ).not.toBeInTheDocument();
@@ -677,7 +677,7 @@ it("reloads an open local diff when its file counter is clicked again", async ()
   expect(diff).toHaveBeenCalledTimes(4);
   expect(screen.getByRole("tab", { name: "Local changes" })).toBeVisible();
   expect(
-    screen.queryByRole("tab", { name: "Changes since base" }),
+    screen.queryByRole("tab", { name: "Branch diff" }),
   ).not.toBeInTheDocument();
 });
 

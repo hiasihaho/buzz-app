@@ -68,7 +68,7 @@ export function WorktreeDiffPanel({
   Partial<Pick<PanelProps, "target">> & { worktrees: Worktrees }) {
   const comparison = targetComparison(target);
   usePanelTabTitle(
-    comparison === "since-base" ? "Changes since base" : "Local changes",
+    comparison === "since-base" ? "Branch diff" : "Local changes",
     tabIcon,
   );
   const channelId = context?.channelId ?? channelContext?.channelId;

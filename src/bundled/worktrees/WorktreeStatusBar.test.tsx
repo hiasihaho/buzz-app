@@ -139,6 +139,10 @@ it("shows repository status and opens both diff comparisons", async () => {
 
   for (const [name, hint] of [
     [/View 3 changed files/, "View local changes"],
+    [
+      "View changes from 2 local commits since the base",
+      "View branch diff: 2 commits ahead of origin/main; 2 commits not found on a local remote-tracking branch",
+    ],
     ["Copy worktree path", "Copy worktree path"],
     ["Refresh local worktree status", "Refresh local worktree status"],
   ] as const) {
@@ -170,6 +174,53 @@ it("shows repository status and opens both diff comparisons", async () => {
     screen.getByRole("button", { name: "Refresh local worktree status" }),
   );
   expect(load).toHaveBeenCalledTimes(2);
+});
+
+it("describes branch diff availability when the commit count is unknown or disabled", async () => {
+  const user = userEvent.setup();
+  const { ahead: _ahead, ...statusWithoutAhead } = readyStatus;
+  const withoutCount = { ...summary, status: statusWithoutAhead };
+  const mounted = render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(vi.fn(async () => withoutCount))}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={canvas}
+    />,
+  );
+
+  const unknown = await screen.findByRole("button", {
+    name: "View changes since the base",
+  });
+  await user.hover(unknown);
+  expect(
+    await screen.findByRole("tooltip", { name: "View branch diff" }),
+  ).toBeVisible();
+  await user.unhover(unknown);
+
+  mounted.unmount();
+  render(
+    <WorktreeStatusBar
+      channelId="channel"
+      worktrees={service(vi.fn(async () => summaryForLifecycle("failed")))}
+      openDiff={() => {}}
+      agentWorking={false}
+      session={session}
+      canvas={canvas}
+    />,
+  );
+
+  const disabled = await screen.findByRole("button", {
+    name: "View changes since the base",
+  });
+  disabled.focus();
+  expect(
+    await screen.findByRole("tooltip", {
+      name: "Branch diff is unavailable",
+    }),
+  ).toBeVisible();
 });
 
 it("shows blocker paths and withholds destructive confirmation", async () => {

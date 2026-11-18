@@ -4,6 +4,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Panel, PanelProps } from "../../features/panels/service";
+import { PanelWorkspace } from "../../features/panels/PanelWorkspace";
 import type { ChatMenuProps } from "../../features/conversation/service";
 import type {
   WorktreeDiff,
@@ -147,6 +148,33 @@ it("renders the bound local diff and a truthful clean or untracked empty state",
       "No tracked diff. Git reports 1 changed or untracked file.",
     ),
   ).toBeVisible();
+});
+
+it("names the cumulative panel tab with its compact branch label", async () => {
+  const worktrees = service(vi.fn(async () => result("alpha", "since-base")));
+  render(
+    <PanelWorkspace
+      focusOnMount={false}
+      items={[
+        {
+          id: "diff",
+          label: "Local changes",
+          close: () => {},
+          content: (
+            <WorktreeDiffPanel
+              {...props("alpha")}
+              target={worktreeDiffTarget("alpha", "since-base")}
+              worktrees={worktrees}
+            />
+          ),
+        },
+      ]}
+      value="diff"
+      select={() => {}}
+    />,
+  );
+
+  expect(await screen.findByRole("tab", { name: "Branch diff" })).toBeVisible();
 });
 
 it("switches comparisons without retaining the previous mode", async () => {
