@@ -657,6 +657,7 @@ it("reloads an open local diff when its file counter is clicked again", async ()
     expect.any(AbortSignal),
     "since-base",
   );
+  expect(diff).toHaveBeenCalledTimes(3);
   expect(screen.getByRole("tab", { name: "Changes since base" })).toBeVisible();
   expect(
     screen.queryByRole("tab", { name: "Local changes" }),
@@ -673,6 +674,7 @@ it("reloads an open local diff when its file counter is clicked again", async ()
     expect.any(AbortSignal),
     "uncommitted",
   );
+  expect(diff).toHaveBeenCalledTimes(4);
   expect(screen.getByRole("tab", { name: "Local changes" })).toBeVisible();
   expect(
     screen.queryByRole("tab", { name: "Changes since base" }),
