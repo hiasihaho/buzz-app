@@ -293,6 +293,7 @@ describe("worktree chat service", () => {
       "",
     ].join("\n");
     let mergeBaseOutput = `${"c".repeat(40)}\n`;
+    let diffOutput = patch;
     const spawn: NonNullable<Host["spawn"]> = vi.fn(
       async (_id, options = {}) => {
         const args = options.args ?? [];
@@ -311,7 +312,7 @@ describe("worktree chat service", () => {
         else if (args.includes("rev-list"))
           stdout = args.includes("--left-right") ? "0 0\n" : "3\n";
         else if (args.includes("merge-base")) stdout = mergeBaseOutput;
-        else if (args.includes("diff")) stdout = patch;
+        else if (args.includes("diff")) stdout = diffOutput;
         else throw new Error(`Unexpected git call: ${args.join(" ")}`);
         options.onStdout?.(stdout);
         return {
@@ -405,6 +406,11 @@ describe("worktree chat service", () => {
     await expect(
       service.diff(binding.channelId, undefined, "since-base"),
     ).rejects.toThrow("Git returned an invalid merge base");
+
+    diffOutput = "x".repeat(2_000_001);
+    await expect(service.diff(binding.channelId)).rejects.toThrow(
+      "Git output exceeds 2000000 bytes",
+    );
   });
 
   it("reuses an owned binding when retry text changes", async () => {
