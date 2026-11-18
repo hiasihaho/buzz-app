@@ -21,6 +21,10 @@
   white-space: nowrap;
 }
 
+.location .evidence {
+  white-space: normal;
+}
+
 .location strong {
   color: var(--text-standard);
   font-size: var(--text-label);

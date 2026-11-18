@@ -292,6 +292,7 @@ describe("worktree chat service", () => {
       "+after",
       "",
     ].join("\n");
+    let mergeBaseOutput = `${"c".repeat(40)}\n`;
     const spawn: NonNullable<Host["spawn"]> = vi.fn(
       async (_id, options = {}) => {
         const args = options.args ?? [];
@@ -309,6 +310,7 @@ describe("worktree chat service", () => {
           ].join("\0");
         else if (args.includes("rev-list"))
           stdout = args.includes("--left-right") ? "0 0\n" : "3\n";
+        else if (args.includes("merge-base")) stdout = mergeBaseOutput;
         else if (args.includes("diff")) stdout = patch;
         else throw new Error(`Unexpected git call: ${args.join(" ")}`);
         options.onStdout?.(stdout);
@@ -357,6 +359,52 @@ describe("worktree chat service", () => {
         ],
       }),
     );
+
+    await expect(
+      service.diff(binding.channelId, undefined, "since-base"),
+    ).resolves.toMatchObject({
+      content: patch,
+      comparison: "since-base",
+      baseRef: binding.baseRef,
+      unpublishedCommits: 3,
+    });
+    expect(spawn).toHaveBeenCalledWith(
+      "git",
+      expect.objectContaining({
+        args: [
+          "--no-optional-locks",
+          "-C",
+          binding.path,
+          "merge-base",
+          "--",
+          binding.baseRef,
+          "HEAD",
+        ],
+      }),
+    );
+    expect(spawn).toHaveBeenLastCalledWith(
+      "git",
+      expect.objectContaining({
+        args: [
+          "--no-optional-locks",
+          "-C",
+          binding.path,
+          "diff",
+          "--no-ext-diff",
+          "--no-color",
+          "--src-prefix=a/",
+          "--dst-prefix=b/",
+          "--full-index",
+          "c".repeat(40),
+          "--",
+        ],
+      }),
+    );
+
+    mergeBaseOutput = "not-a-commit\n";
+    await expect(
+      service.diff(binding.channelId, undefined, "since-base"),
+    ).rejects.toThrow("Git returned an invalid merge base");
   });
 
   it("reuses an owned binding when retry text changes", async () => {
@@ -694,6 +742,32 @@ describe("worktree chat service", () => {
       });
       expect(run(path, ["rev-parse", "HEAD"])).toBe(head);
       expect(service.canDiff(binding.channelId)).toBe(true);
+
+      await writeFile(join(repoRoot, "MAIN.md"), "main advanced\n");
+      run(repoRoot, ["add", "MAIN.md"]);
+      run(repoRoot, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "commit",
+        "-qm",
+        "advance main",
+      ]);
+      await writeFile(join(path, "README.md"), "base\ncontinued\nworking\n");
+      const cumulative = await service.diff(
+        binding.channelId,
+        undefined,
+        "since-base",
+      );
+      expect(cumulative.content).toContain("+continued");
+      expect(cumulative.content).toContain("+working");
+      expect(cumulative.content).not.toContain("main advanced");
+      expect(cumulative).toMatchObject({
+        comparison: "since-base",
+        baseRef: "main",
+        status: { dirty: true, ahead: 1, behind: 1 },
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

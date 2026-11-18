@@ -528,8 +528,10 @@ and are asked to sign in again in Buzz.
   remains available to retry. A chat with a ready local worktree shows its
   repository, branch, base, file status and local commit counts above the
   composer. Use the file count there, or choose **Chat actions** → **View local
-  changes**, to inspect its tracked Git diff in the side panel. The commit count
-  opens details; remote-tracking evidence is informational and does not by itself
+  changes**, to inspect its uncommitted tracked Git diff in the side panel. Use
+  the commit count to open the same panel with committed and uncommitted tracked
+  changes since the worktree branch diverged from its configured base. The
+  panel's remote-tracking evidence is informational and does not by itself
   prevent removing a worktree. The copy action copies the full worktree path,
   and Refresh reads the local status again. Untracked files are counted but are
   not rendered as a patch. **Finish** checks the worktree again and explains

@@ -558,13 +558,26 @@ it("reloads an open local diff when its file counter is clicked again", async ()
     detached: false,
     dirty: fileCount > 0,
     fileCount,
+    ahead: 2,
+    behind: 0,
   });
-  const diff = vi.fn(async () => ({
-    content: "",
-    path: "/trees/alpha",
-    branch: "buzz/alpha",
-    status: status(),
-  }));
+  const diff = vi.fn(
+    async (
+      _channelId: string,
+      _signal?: AbortSignal,
+      comparison: "uncommitted" | "since-base" = "uncommitted",
+    ) => ({
+      content: "",
+      path: "/trees/alpha",
+      branch: "buzz/alpha",
+      status: status(),
+      comparison,
+      ...(comparison === "since-base" && {
+        baseRef: "main",
+        unpublishedCommits: 0,
+      }),
+    }),
+  );
   const worktrees: Worktrees = {
     has: () => true,
     canDiff: () => true,
@@ -602,7 +615,7 @@ it("reloads an open local diff when its file counter is clicked again", async ()
     undefined,
     worktrees,
     true,
-    (target) => target === worktreeDiffTarget("alpha"),
+    (target) => target.startsWith(worktreeDiffTarget("alpha")),
   );
   const counter = await screen.findByRole("button", {
     name: "View 1 changed file in local changes",
@@ -624,6 +637,20 @@ it("reloads an open local diff when its file counter is clicked again", async ()
     ),
   ).toBeVisible();
   expect(diff).toHaveBeenCalledTimes(2);
+
+  await h.user.click(
+    screen.getByRole("button", {
+      name: "View changes from 2 local commits since the base",
+    }),
+  );
+  expect(
+    await screen.findByText("Changes since the merge base with main"),
+  ).toBeVisible();
+  expect(diff).toHaveBeenLastCalledWith(
+    "alpha",
+    expect.any(AbortSignal),
+    "since-base",
+  );
 });
 
 it("gives a chat-menu-opened local diff panel its originating chat context", async () => {
@@ -688,7 +715,11 @@ it("gives a chat-menu-opened local diff panel its originating chat context", asy
     ).toBe(true),
   );
   expect(await screen.findByText("buzz/alpha")).toBeVisible();
-  expect(diff).toHaveBeenCalledWith("alpha", expect.any(AbortSignal));
+  expect(diff).toHaveBeenCalledWith(
+    "alpha",
+    expect.any(AbortSignal),
+    "uncommitted",
+  );
 });
 
 it.each(["side", "main"] as const)(

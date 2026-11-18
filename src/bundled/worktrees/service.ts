@@ -20,11 +20,16 @@ export type WorktreeWorkspace = Readonly<{
   location: string;
 }>;
 
+export type WorktreeDiffComparison = "uncommitted" | "since-base";
+
 export type WorktreeDiff = Readonly<{
   content: string;
   path: string;
   branch: string;
   status: WorkspaceStatus;
+  comparison?: WorktreeDiffComparison;
+  baseRef?: string;
+  unpublishedCommits?: number;
 }>;
 
 export type WorktreeSummary = Readonly<{
@@ -54,7 +59,11 @@ export type Worktrees = WorktreePreparation &
     has(channelId: string): boolean;
     canDiff(channelId: string): boolean;
     summary(channelId: string, signal?: AbortSignal): Promise<WorktreeSummary>;
-    diff(channelId: string, signal?: AbortSignal): Promise<WorktreeDiff>;
+    diff(
+      channelId: string,
+      signal?: AbortSignal,
+      comparison?: WorktreeDiffComparison,
+    ): Promise<WorktreeDiff>;
     previewFinish(
       channelId: string,
       inspectAgents: () => readonly string[],
@@ -270,11 +279,26 @@ export function createWorktrees(
         ...(unpublishedCommits !== undefined && { unpublishedCommits }),
       };
     },
-    async diff(channelId, signal) {
+    async diff(channelId, signal, comparison = "uncommitted") {
       if (!desktop) throw new Error("Local Git is unavailable");
       await recovery;
       const binding = readyBinding(bindings, channelId);
       const status = await readyStatus(desktop.spawn, binding, signal);
+      const base =
+        comparison === "since-base"
+          ? parseCommit(
+              await runGit(
+                desktop.spawn,
+                binding.path,
+                ["merge-base", "--", binding.baseRef, "HEAD"],
+                signal,
+              ),
+            )
+          : "HEAD";
+      const unpublishedCommits =
+        comparison === "since-base"
+          ? await countUnpublishedCommits(desktop.spawn, binding.path, signal)
+          : undefined;
       const content = await runGit(
         desktop.spawn,
         binding.path,
@@ -285,14 +309,22 @@ export function createWorktrees(
           "--src-prefix=a/",
           "--dst-prefix=b/",
           "--full-index",
-          "HEAD",
+          base,
           "--",
         ],
         signal,
         undefined,
         MAX_DIFF_BYTES,
       );
-      return { content, path: binding.path, branch: binding.branch, status };
+      return {
+        content,
+        path: binding.path,
+        branch: binding.branch,
+        status,
+        comparison,
+        ...(comparison === "since-base" && { baseRef: binding.baseRef }),
+        ...(unpublishedCommits !== undefined && { unpublishedCommits }),
+      };
     },
     async previewFinish(channelId, inspectAgents, signal) {
       if (!desktop) throw new Error("Local Git is unavailable");
@@ -428,6 +460,13 @@ async function readyStatus(
           : "The local worktree no longer matches this chat"),
     );
   return status;
+}
+
+function parseCommit(value: string): string {
+  const commit = value.trim();
+  if (!/^[0-9a-f]{40,64}$/.test(commit))
+    throw new Error("Git returned an invalid merge base");
+  return commit;
 }
 
 function workspace(value: Workspace): WorktreeWorkspace | undefined {

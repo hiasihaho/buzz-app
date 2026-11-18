@@ -27,6 +27,7 @@ import { refreshWorktreeDiff } from "./panel";
 import {
   removedWorkspaceCanvas,
   reopenedWorkspaceCanvas,
+  type WorktreeDiffComparison,
   type WorktreeSummary,
   type Worktrees,
 } from "./service";
@@ -116,7 +117,7 @@ export function WorktreeStatusBar({
 }: {
   channelId: string;
   worktrees: Worktrees;
-  openDiff(): void;
+  openDiff(comparison?: WorktreeDiffComparison): void;
   agentWorking: boolean;
   session: Pick<RelaySession, "agentActivity" | "typing" | "agentChoices">;
   canvas: ChannelCanvas;
@@ -497,7 +498,7 @@ export function WorktreeStatusBar({
                     ? `View ${countLabel(fileCount, "changed file")} in local changes`
                     : "View local changes"
                 }
-                onClick={openDiff}
+                onClick={() => openDiff()}
                 disabled={!ready}
                 title={
                   ready ? "View local changes" : "Local changes are unavailable"
@@ -506,38 +507,29 @@ export function WorktreeStatusBar({
                 <FileTextIcon size={14} aria-hidden="true" />
                 <span>{fileCount}</span>
               </Button>
-              <PopoverRoot>
-                <PopoverTrigger
-                  disabled={!ready}
-                  render={
-                    <Button
-                      size="inline"
-                      variant="ghost"
-                      aria-label={
-                        ahead === undefined
-                          ? "Local commit details"
-                          : `${countLabel(ahead, "local commit")}; show details`
-                      }
-                      title="Local commit details"
-                    >
-                      <GitCommitIcon size={14} aria-hidden="true" />
-                      <span>{ahead ?? "—"}</span>
-                    </Button>
-                  }
-                />
-                <PopoverPopup side="top" align="end" size="compact">
-                  <PopoverTitle>Local commits</PopoverTitle>
-                  <PopoverDescription>
-                    {ahead === undefined
-                      ? `Commits ahead of ${summary?.baseRef ?? "the base"} could not be determined.`
-                      : `${countLabel(ahead, "commit")} ahead of ${summary?.baseRef}.`}{" "}
-                    {unpublished === undefined
-                      ? "Remote-tracking evidence is unavailable."
-                      : `${countLabel(unpublished, "commit")} not found on a local remote-tracking branch.`}{" "}
-                    This evidence is informational.
-                  </PopoverDescription>
-                </PopoverPopup>
-              </PopoverRoot>
+              <Button
+                size="inline"
+                variant="ghost"
+                disabled={!ready}
+                aria-label={
+                  ahead === undefined
+                    ? "View changes since the base"
+                    : `View changes from ${countLabel(ahead, "local commit")} since the base`
+                }
+                title={
+                  ahead === undefined
+                    ? "View changes since the base"
+                    : `${countLabel(ahead, "commit")} ahead of ${summary?.baseRef}; ${
+                        unpublished === undefined
+                          ? "remote-tracking evidence unavailable"
+                          : `${countLabel(unpublished, "commit")} not found on a local remote-tracking branch`
+                      }`
+                }
+                onClick={() => openDiff("since-base")}
+              >
+                <GitCommitIcon size={14} aria-hidden="true" />
+                <span>{ahead ?? "—"}</span>
+              </Button>
               <IconButton
                 size="xs"
                 variant="ghost"

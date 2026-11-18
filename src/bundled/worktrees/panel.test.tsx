@@ -10,6 +10,7 @@ import {
   refreshWorktreeDiff,
   registerWorktreeDiff,
   WorktreeDiffPanel,
+  worktreeDiffTarget,
 } from "./panel";
 
 afterEach(cleanup);
@@ -23,11 +24,19 @@ const status = {
   fileCount: 1,
 };
 
-function result(channelId = "alpha"): WorktreeDiff {
+function result(
+  channelId = "alpha",
+  comparison: WorktreeDiff["comparison"] = "uncommitted",
+): WorktreeDiff {
   return {
     path: `/trees/${channelId}`,
     branch: `buzz/${channelId}`,
-    status: { ...status, path: `/trees/${channelId}` },
+    status: { ...status, path: `/trees/${channelId}`, ahead: 2 },
+    comparison,
+    ...(comparison === "since-base" && {
+      baseRef: "origin/main",
+      unpublishedCommits: 1,
+    }),
     content: [
       `diff --git a/${channelId}.txt b/${channelId}.txt`,
       "index 1111111..2222222 100644",
@@ -136,6 +145,82 @@ it("renders the bound local diff and a truthful clean or untracked empty state",
   ).toBeVisible();
 });
 
+it("switches comparisons without retaining the previous mode", async () => {
+  const cumulative = deferred<WorktreeDiff>();
+  const diff = vi.fn<Worktrees["diff"]>(
+    async (channelId, _signal, comparison) =>
+      comparison === "since-base"
+        ? cumulative.promise
+        : result(channelId, comparison),
+  );
+  const mounted = render(
+    <WorktreeDiffPanel
+      {...props("alpha")}
+      target={worktreeDiffTarget("alpha")}
+      worktrees={service(diff)}
+    />,
+  );
+  expect(await screen.findByText("buzz/alpha")).toBeVisible();
+  expect(
+    screen.queryByText(/Changes since the merge base/),
+  ).not.toBeInTheDocument();
+  expect(diff).toHaveBeenLastCalledWith(
+    "alpha",
+    expect.any(AbortSignal),
+    "uncommitted",
+  );
+
+  mounted.rerender(
+    <WorktreeDiffPanel
+      {...props("alpha")}
+      target={worktreeDiffTarget("alpha", "since-base")}
+      worktrees={service(diff)}
+    />,
+  );
+  expect(mounted.container.querySelector('[aria-busy="true"]')).toBeVisible();
+  expect(
+    screen.queryByRole("region", { name: "alpha.txt" }),
+  ).not.toBeInTheDocument();
+  await act(async () => cumulative.resolve(result("alpha", "since-base")));
+  expect(
+    await screen.findByText("Changes since the merge base with origin/main"),
+  ).toBeVisible();
+  expect(screen.getByText(/2 commits ahead of origin\/main/)).toBeVisible();
+  expect(
+    screen.getByText(/1 commit not found on a local remote-tracking branch/),
+  ).toBeVisible();
+  expect(screen.getByText(/This evidence is informational/)).toBeVisible();
+  expect(diff).toHaveBeenLastCalledWith(
+    "alpha",
+    expect.any(AbortSignal),
+    "since-base",
+  );
+});
+
+it("reports unavailable commit evidence in the cumulative panel", async () => {
+  render(
+    <WorktreeDiffPanel
+      {...props("alpha")}
+      target={worktreeDiffTarget("alpha", "since-base")}
+      worktrees={service(
+        vi.fn(async () => {
+          const { unpublishedCommits: _unpublished, ...withoutUnpublished } =
+            result("alpha", "since-base");
+          return { ...withoutUnpublished, status };
+        }),
+      )}
+    />,
+  );
+  expect(
+    await screen.findByText(
+      /Commits ahead of origin\/main could not be determined/,
+    ),
+  ).toBeVisible();
+  expect(
+    screen.getByText(/Remote-tracking evidence is unavailable/),
+  ).toBeVisible();
+});
+
 it("refreshes in place while keeping the last diff visible", async () => {
   let resolveRefresh!: (value: WorktreeDiff) => void;
   const refresh = new Promise<WorktreeDiff>((resolve) => {
@@ -189,14 +274,22 @@ it("invalidates a removed worktree instead of retaining a stale clean claim", as
   const diff = vi
     .fn<Worktrees["diff"]>()
     .mockResolvedValueOnce({
-      ...result("alpha"),
+      ...result("alpha", "since-base"),
       content: "",
       status: { ...status, dirty: false, fileCount: 0 },
     })
     .mockRejectedValueOnce(new Error("This chat has no ready local worktree"));
-  render(<WorktreeDiffPanel {...props("alpha")} worktrees={service(diff)} />);
+  render(
+    <WorktreeDiffPanel
+      {...props("alpha")}
+      target={worktreeDiffTarget("alpha", "since-base")}
+      worktrees={service(diff)}
+    />,
+  );
   expect(
-    await screen.findByText("The local worktree has no changes."),
+    await screen.findByText(
+      "No changes since the merge base with origin/main.",
+    ),
   ).toBeVisible();
 
   act(() => refreshWorktreeDiff("alpha", true));
@@ -204,7 +297,7 @@ it("invalidates a removed worktree instead of retaining a stale clean claim", as
     "This chat has no ready local worktree",
   );
   expect(
-    screen.queryByText("The local worktree has no changes."),
+    screen.queryByText("No changes since the merge base with origin/main."),
   ).not.toBeInTheDocument();
 });
 

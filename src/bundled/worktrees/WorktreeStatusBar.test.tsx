@@ -117,7 +117,7 @@ function service(
   };
 }
 
-it("shows repository status and opens the diff and commit details", async () => {
+it("shows repository status and opens both diff comparisons", async () => {
   const user = userEvent.setup();
   const openDiff = vi.fn();
   const load = vi.fn(async () => summary);
@@ -139,7 +139,6 @@ it("shows repository status and opens the diff and commit details", async () => 
 
   for (const [name, hint] of [
     [/View 3 changed files/, "View local changes"],
-    [/2 local commits/, "Local commit details"],
     ["Copy worktree path", "Copy worktree path"],
     ["Refresh local worktree status", "Refresh local worktree status"],
   ] as const) {
@@ -154,10 +153,12 @@ it("shows repository status and opens the diff and commit details", async () => 
   );
   expect(openDiff).toHaveBeenCalledOnce();
 
-  await user.click(screen.getByRole("button", { name: /2 local commits/ }));
-  expect(await screen.findByText("Local commits")).toBeVisible();
-  expect(screen.getByText(/2 commits ahead of origin\/main/)).toBeVisible();
-  expect(screen.getByText(/evidence is informational/)).toBeVisible();
+  await user.click(
+    screen.getByRole("button", {
+      name: "View changes from 2 local commits since the base",
+    }),
+  );
+  expect(openDiff).toHaveBeenLastCalledWith("since-base");
 
   await user.click(screen.getByRole("button", { name: "Copy worktree path" }));
   expect(writeClipboardText).toHaveBeenCalledWith(summary.path);

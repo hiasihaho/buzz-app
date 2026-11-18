@@ -7,7 +7,11 @@ import { LoadingRegion } from "../../shared/design-system/ui/LoadingRegion";
 import { MenuIcon, MenuItem } from "../../shared/design-system/ui/Menu";
 import { DiffViewer } from "../diffs/DiffViewer";
 import { parsePatch } from "../diffs/parse";
-import type { WorktreeDiff, Worktrees } from "./service";
+import type {
+  WorktreeDiff,
+  WorktreeDiffComparison,
+  Worktrees,
+} from "./service";
 import styles from "./WorktreeDiffPanel.module.css";
 
 const targetPrefix = "buzz:worktree-diff:";
@@ -31,8 +35,15 @@ export function refreshWorktreeDiff(channelId: string, invalidate = false) {
     listener(invalidate);
 }
 
-export function worktreeDiffTarget(channelId: string) {
-  return `${targetPrefix}${channelId}`;
+export function worktreeDiffTarget(
+  channelId: string,
+  comparison: WorktreeDiffComparison = "uncommitted",
+) {
+  return `${targetPrefix}${channelId}${comparison === "since-base" ? ":since-base" : ""}`;
+}
+
+function targetComparison(target: string | undefined): WorktreeDiffComparison {
+  return target?.endsWith(":since-base") ? "since-base" : "uncommitted";
 }
 
 function message(reason: unknown) {
@@ -45,11 +56,18 @@ export function WorktreeDiffPanel({
   worktrees,
   context,
   channelContext,
-}: Pick<PanelProps, "context" | "channelContext"> & { worktrees: Worktrees }) {
-  usePanelTabTitle("Local changes", tabIcon);
+  target,
+}: Pick<PanelProps, "context" | "channelContext"> &
+  Partial<Pick<PanelProps, "target">> & { worktrees: Worktrees }) {
+  const comparison = targetComparison(target);
+  usePanelTabTitle(
+    comparison === "since-base" ? "Changes since base" : "Local changes",
+    tabIcon,
+  );
   const channelId = context?.channelId ?? channelContext?.channelId;
   const [state, setState] = useState<{
     channelId: string;
+    comparison: WorktreeDiffComparison;
     result?: WorktreeDiff;
     error?: Error;
   }>();
@@ -61,25 +79,34 @@ export function WorktreeDiffPanel({
       const controller = new AbortController();
       request.current = controller;
       setState((current) => {
-        if (invalidate || current?.channelId !== channelId) return undefined;
+        if (
+          invalidate ||
+          current?.channelId !== channelId ||
+          current.comparison !== comparison
+        )
+          return undefined;
         if (!current.error) return current;
         const { error: _error, ...withoutError } = current;
         return withoutError;
       });
-      worktrees.diff(channelId, controller.signal).then(
+      worktrees.diff(channelId, controller.signal, comparison).then(
         (result) => {
-          if (!controller.signal.aborted) setState({ channelId, result });
+          if (!controller.signal.aborted)
+            setState({ channelId, comparison, result });
         },
         (reason: unknown) => {
           if (controller.signal.aborted) return;
           setState((current) => ({
-            ...(current?.channelId === channelId ? current : { channelId }),
+            ...(current?.channelId === channelId &&
+            current.comparison === comparison
+              ? current
+              : { channelId, comparison }),
             error: new Error(message(reason)),
           }));
         },
       );
     },
-    [worktrees, channelId],
+    [worktrees, channelId, comparison],
   );
   useEffect(() => {
     if (!channelId) return;
@@ -90,7 +117,10 @@ export function WorktreeDiffPanel({
       request.current?.abort();
     };
   }, [channelId, load]);
-  const current = state?.channelId === channelId ? state : undefined;
+  const current =
+    state && state.channelId === channelId && state.comparison === comparison
+      ? state
+      : undefined;
   const result = current?.result;
   const error = current?.error;
   const files = useMemo(
@@ -108,9 +138,25 @@ export function WorktreeDiffPanel({
       >
         {result && (
           <>
-            <p className={styles.location} title={result.path}>
+            <p className={styles.location}>
               <strong>{result.branch}</strong>
-              <span>{result.path}</span>
+              {result.comparison === "since-base" && (
+                <>
+                  <span>
+                    Changes since the merge base with {result.baseRef}
+                  </span>
+                  <span className={styles.evidence}>
+                    {result.status.ahead === undefined
+                      ? `Commits ahead of ${result.baseRef} could not be determined.`
+                      : `${result.status.ahead} ${result.status.ahead === 1 ? "commit" : "commits"} ahead of ${result.baseRef}.`}{" "}
+                    {result.unpublishedCommits === undefined
+                      ? "Remote-tracking evidence is unavailable."
+                      : `${result.unpublishedCommits} ${result.unpublishedCommits === 1 ? "commit" : "commits"} not found on a local remote-tracking branch.`}{" "}
+                    This evidence is informational.
+                  </span>
+                </>
+              )}
+              <span title={result.path}>{result.path}</span>
             </p>
             {result.content ? (
               <DiffViewer content={result.content} files={files} />
@@ -118,7 +164,9 @@ export function WorktreeDiffPanel({
               <p role="status" className={styles.empty}>
                 {result.status.dirty
                   ? `No tracked diff. Git reports ${result.status.fileCount} changed or untracked ${result.status.fileCount === 1 ? "file" : "files"}.`
-                  : "The local worktree has no changes."}
+                  : result.comparison === "since-base"
+                    ? `No changes since the merge base with ${result.baseRef}.`
+                    : "The local worktree has no changes."}
               </p>
             )}
           </>
