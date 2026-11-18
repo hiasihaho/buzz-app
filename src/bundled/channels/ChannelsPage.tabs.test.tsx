@@ -47,7 +47,7 @@ import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { BrowserHostView } from "../../features/browser/BrowserHostView";
 import { BrowserSessions } from "../../features/browser/sessions";
 import type { BrowserPlatform } from "../../features/browser/platform";
-import { WorktreeDiffPanel } from "../worktrees/panel";
+import { WorktreeDiffPanel, worktreeDiffTarget } from "../worktrees/panel";
 import type { WorktreeSummary, Worktrees } from "../worktrees/service";
 import type { WorkspaceFinishPreview } from "../worktrees/finish";
 
@@ -113,6 +113,7 @@ async function page(
   soloPreferences?: RelaySession["soloPreferences"],
   worktrees?: Worktrees,
   initialVisit = false,
+  appMatches?: RegisteredPanel["matches"],
 ) {
   const viewer = keypair(),
     authority = keypair();
@@ -214,7 +215,8 @@ async function page(
     revision: "1",
     title: "App",
     keepOpen: true,
-    matches: (target) => target === "https://app.example/",
+    matches: (target) =>
+      target === "https://app.example/" || appMatches?.(target) === true,
     component: appComponent ?? (() => <p>App content</p>),
   };
   const available = [panel, app];
@@ -545,6 +547,83 @@ it("drops an open worktree finish preview when the main Solo chat changes", asyn
   h.visit("gamma");
   expect(await screen.findByText("buzz/gamma")).toBeVisible();
   expect(screen.queryByText("Remove local worktree?")).not.toBeInTheDocument();
+});
+
+it("reloads an open local diff when its file counter is clicked again", async () => {
+  let fileCount = 1;
+  const status = () => ({
+    state: "ready" as const,
+    path: "/trees/alpha",
+    branch: "buzz/alpha",
+    detached: false,
+    dirty: fileCount > 0,
+    fileCount,
+  });
+  const diff = vi.fn(async () => ({
+    content: "",
+    path: "/trees/alpha",
+    branch: "buzz/alpha",
+    status: status(),
+  }));
+  const worktrees: Worktrees = {
+    has: () => true,
+    canDiff: () => true,
+    summary: async () => ({
+      repository: "/repo",
+      path: "/trees/alpha",
+      branch: "buzz/alpha",
+      baseRef: "main",
+      baseSha: "b".repeat(40),
+      lifecycle: "ready",
+      status: status(),
+      unpublishedCommits: 0,
+    }),
+    diff,
+    workspace: () => undefined,
+    prepare: async () => undefined,
+    previewFinish: async () => {
+      throw new Error("not implemented");
+    },
+    remove: async () => {
+      throw new Error("not implemented");
+    },
+    reopen: async () => {
+      throw new Error("not implemented");
+    },
+    recover: async () => {
+      throw new Error("not implemented");
+    },
+  };
+  const h = await page(
+    "solo",
+    undefined,
+    false,
+    (props) => <WorktreeDiffPanel {...props} worktrees={worktrees} />,
+    undefined,
+    worktrees,
+    true,
+    (target) => target === worktreeDiffTarget("alpha"),
+  );
+  const counter = await screen.findByRole("button", {
+    name: "View 1 changed file in local changes",
+  });
+
+  await h.user.click(counter);
+  expect(
+    await screen.findByText(
+      "No tracked diff. Git reports 1 changed or untracked file.",
+    ),
+  ).toBeVisible();
+  expect(diff).toHaveBeenCalledTimes(1);
+
+  fileCount = 2;
+  await h.user.click(counter);
+  expect(
+    await screen.findByText(
+      "No tracked diff. Git reports 2 changed or untracked files.",
+    ),
+  ).toBeVisible();
+  expect(diff).toHaveBeenCalledTimes(2);
 });
 
 it("gives a chat-menu-opened local diff panel its originating chat context", async () => {

@@ -94,10 +94,7 @@ export function WorktreeDiffPanel({
   const result = current?.result;
   const error = current?.error;
   const files = useMemo(
-    () =>
-      result && !(result instanceof Error)
-        ? parsePatch(result.content)
-        : undefined,
+    () => (result ? parsePatch(result.content) : undefined),
     [result],
   );
   if (!channelId)

@@ -85,6 +85,14 @@ function props(channelId: string): Pick<PanelProps, "channelContext"> {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 it("renders the bound local diff and a truthful clean or untracked empty state", async () => {
   const worktrees = service(vi.fn(async () => result()));
   const mounted = render(
@@ -147,6 +155,34 @@ it("refreshes in place while keeping the last diff visible", async () => {
 
   act(() => resolveRefresh(result("updated")));
   expect(await screen.findByText("buzz/updated")).toBeVisible();
+});
+
+it("aborts an older same-chat request and ignores its stale result", async () => {
+  const firstRefresh = deferred<WorktreeDiff>();
+  const secondRefresh = deferred<WorktreeDiff>();
+  const diff = vi
+    .fn<Worktrees["diff"]>()
+    .mockResolvedValueOnce(result("initial"))
+    .mockReturnValueOnce(firstRefresh.promise)
+    .mockReturnValueOnce(secondRefresh.promise);
+  render(<WorktreeDiffPanel {...props("alpha")} worktrees={service(diff)} />);
+  expect(await screen.findByText("buzz/initial")).toBeVisible();
+
+  act(() => refreshWorktreeDiff("alpha"));
+  await waitFor(() => expect(diff).toHaveBeenCalledTimes(2));
+  const firstSignal = diff.mock.calls[1]?.[1];
+  expect(firstSignal?.aborted).toBe(false);
+
+  act(() => refreshWorktreeDiff("alpha"));
+  await waitFor(() => expect(diff).toHaveBeenCalledTimes(3));
+  expect(firstSignal?.aborted).toBe(true);
+
+  await act(async () => firstRefresh.resolve(result("stale")));
+  expect(screen.queryByText("buzz/stale")).not.toBeInTheDocument();
+  expect(screen.getByText("buzz/initial")).toBeVisible();
+
+  await act(async () => secondRefresh.resolve(result("current")));
+  expect(await screen.findByText("buzz/current")).toBeVisible();
 });
 
 it("invalidates a removed worktree instead of retaining a stale clean claim", async () => {
